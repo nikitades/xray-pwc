@@ -28,12 +28,23 @@ A check of one link, on one probe, is:
 Each page gets up to 3 attempts with a 30 s navigation timeout and a backoff
 of 2 s, then 4 s. Both lists are plain URLs in the settings.
 
-The link's result is `OK` (every page opened), `partial` (some did) or
-`failed` (none did, or the link could not be started). One metric carries it:
-`pwc_tunnel_up` is 1 when at least one page opened, and its `perfect` label
-says whether all of them did. It is also labelled with the probe name, the
-link name and a hash of the link that does not change when the link is
-renamed.
+The result is the furthest point the check reached, from full failure to
+full success:
+
+| result | meaning | `pwc_tunnel_up` | `perfect` |
+|---|---|---|---|
+| `failed` | the link could not start, or nothing proves that traffic got through | 0 | `false` |
+| `partial` | traffic got through the tunnel, but not every page opened | 1 | `false` |
+| `OK` | every page opened | 1 | `true` |
+
+Traffic "got through" when a page opened, or a site answered with any HTTP
+status, or a TLS handshake with a site failed. A refused SOCKS connection
+proves nothing got through. A timeout or a reset proves nothing either way: it
+can be a dead server or a connection that stalls after the first bytes. So a
+link where every page only timed out counts as `failed`.
+
+The metric is also labelled with the probe name, the link name and a hash of
+the link that does not change when the link is renamed.
 
 ### Why heavy pages
 
@@ -149,8 +160,8 @@ pwc_tunnel_up{instance="spb-home-1",tunnel="ams-ws",stable_id="8a01c7d3e9f25b14"
 pwc_tunnel_up{instance="spb-home-1",tunnel="old-trojan",stable_id="c42e6f0b18a9d357",perfect="false"} 0
 ```
 
-Here `msk-reality` opened every page, `ams-ws` opened some (`partial`), and
-`old-trojan` opened nothing (`failed`).
+Here `msk-reality` opened every page, traffic got through `ams-ws` but not
+every page opened (`partial`), and `old-trojan` failed.
 
 | label | meaning |
 |---|---|

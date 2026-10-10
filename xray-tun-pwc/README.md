@@ -31,11 +31,27 @@ Every page gets up to three tries. The wait between tries doubles: 2 s, then
 
 ### The result for a link
 
-| result | meaning | `pwc_tunnel_up` | `perfect` label |
-|---|---|---|---|
-| `OK` | every page opened | 1 | `true` |
-| `partial` | some pages opened, some did not | 1 | `false` |
-| `failed` | nothing opened, or the link itself is broken | 0 | `false` |
+The result is the furthest stage the check reached:
+
+| stage | result | meaning | `pwc_tunnel_up` | `perfect` label |
+|---|---|---|---|---|
+| link broken | `failed` | the tunnel could not start from this link | 0 | `false` |
+| unreachable | `failed` | nothing proves that traffic got through | 0 | `false` |
+| connected | `partial` | traffic got through, but not every page opened | 1 | `false` |
+| perfect | `OK` | every page opened | 1 | `true` |
+
+What proves that traffic got through the tunnel:
+
+| what happened on a page | proves a connection |
+|---|---|
+| the page opened | yes |
+| the site answered with any HTTP status | yes |
+| a TLS handshake with the site failed | yes |
+| the SOCKS connection was refused (`tunnel`) | no |
+| timeout, reset, DNS error, anything unknown | no: could be a dead server or a stalled connection |
+
+So a link where every page only timed out is `failed`, and a link where
+every site answered `429` is `partial`.
 
 ## Output
 

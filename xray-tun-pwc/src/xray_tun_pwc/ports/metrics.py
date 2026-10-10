@@ -19,8 +19,7 @@ class PrometheusMetrics(MetricsServer, TunnelMetrics):
         default=Factory(
             lambda self: Gauge(
                 "pwc_tunnel_up",
-                "1 when at least one site opened through the tunnel; "
-                'perfect="true" when every site opened',
+                '1 when traffic got through the tunnel; perfect="true" when every site opened',
                 ["instance", "tunnel", "stable_id", "perfect"],
                 registry=self.registry,
             ),
@@ -34,8 +33,8 @@ class PrometheusMetrics(MetricsServer, TunnelMetrics):
     def record(self, checks: Sequence[TunnelCheck]) -> None:
         self.tunnel_up.clear()
         for check in checks:
-            config = check.tunnel.config
-            perfect = "true" if check.perfect else "false"
+            config, reach = check.tunnel.config, check.reach
+            perfect = "true" if reach.perfect else "false"
             self.tunnel_up.labels(self.instance, config.code, config.stable_id, perfect).set(
-                int(check.success)
+                int(reach.success)
             )

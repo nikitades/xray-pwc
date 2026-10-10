@@ -1,4 +1,5 @@
 import hashlib
+from enum import Enum
 from urllib.parse import unquote, urlsplit
 
 from attrs import frozen
@@ -53,24 +54,55 @@ class TunnelGroup:
     tunnels: tuple[SocksTunnel, ...]
 
 
+class Reach(Enum):
+    LINK_BROKEN = (0, "failed")
+    UNREACHABLE = (1, "failed")
+    CONNECTED = (2, "partial")
+    PERFECT = (3, "OK")
+
+    def __init__(self, rank: int, label: str) -> None:
+        self.rank, self.label = rank, label
+
+    @property
+    def success(self) -> bool:
+        return self.rank >= Reach.CONNECTED.rank
+
+    @property
+    def perfect(self) -> bool:
+        return self is Reach.PERFECT
+
+
 @frozen
 class TunnelCheck:
     tunnel: SocksTunnel
     visits: tuple[SiteVisit, ...]
 
     @property
+    def reach(self) -> Reach:
+        if not self.tunnel.ok:
+            return Reach.LINK_BROKEN
+        if not any(visit.proves_connection for visit in self.visits):
+            return Reach.UNREACHABLE
+        if not all(visit.ok for visit in self.visits):
+            return Reach.CONNECTED
+        return Reach.PERFECT
+
+    @property
     def success(self) -> bool:
-        return self.tunnel.ok and any(v.ok for v in self.visits)
+        return self.reach.success
 
     @property
     def perfect(self) -> bool:
-        return self.tunnel.ok and bool(self.visits) and all(v.ok for v in self.visits)
+        return self.reach.perfect
+
+    @property
+    def problems(self) -> tuple[str, ...]:
+        if not self.tunnel.ok:
+            return (f"tunnel: {self.tunnel.error}",)
+        return tuple(visit.to_log() for visit in self.visits if not visit.ok)
 
     def summary(self) -> str:
-        code = self.tunnel.config.code
-        if not self.tunnel.ok:
-            return f"{code} - failed[tunnel: {self.tunnel.error}]"
-        if self.perfect:
-            return f"{code} - OK"
-        problems = ", ".join(v.to_log() for v in self.visits if not v.ok)
-        return f"{code} - {'partial' if self.success else 'failed'}[{problems}]"
+        code, reach = self.tunnel.config.code, self.reach
+        if reach.perfect:
+            return f"{code} - {reach.label}"
+        return f"{code} - {reach.label}[{', '.join(self.problems)}]"

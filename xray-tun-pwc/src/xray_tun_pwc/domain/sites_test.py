@@ -68,3 +68,21 @@ def test_catalog_refuses_heavy_visits_without_heavy_sites():
 def test_catalog_allows_skipping_heavy_sites():
     catalog = SiteCatalog.from_urls(heavy=[], targets=["https://t.me/"], heavy_visits=0)
     assert catalog.heavy == ()
+
+
+@pytest.mark.parametrize(
+    ("kind", "proves"),
+    [
+        (TunnelDown, False),
+        (VisitTimeout, False),
+        (ConnectionReset, False),
+        (DnsFailure, False),
+        (UnrecognizedError, False),
+        (TlsFailure, True),
+        (HttpStatus, True),
+    ],
+)
+def test_only_answers_from_beyond_the_tunnel_prove_a_connection(
+    kind: type[SiteVisitError], proves: bool
+):
+    assert kind.proves_connection is proves

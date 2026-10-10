@@ -68,6 +68,8 @@ class SiteCatalog:
 class SiteVisitError(ABC):
     raw: str
 
+    proves_connection: ClassVar[bool]
+
     @classmethod
     def from_raw(cls, raw: str) -> SiteVisitError:
         kinds: tuple[type[SiteVisitError], ...] = (
@@ -105,34 +107,40 @@ class MarkedVisitError(SiteVisitError):
 class TunnelDown(MarkedVisitError):
     markers = ("ERR_PROXY_CONNECTION_FAILED", "ERR_SOCKS_CONNECTION_FAILED", "ERR_TUNNEL")
     label = "tunnel"
+    proves_connection = False
 
 
 @frozen
 class VisitTimeout(MarkedVisitError):
     markers = ("Timeout", "ERR_TIMED_OUT", "ERR_CONNECTION_TIMED_OUT")
     label = "timeout"
+    proves_connection = False
 
 
 @frozen
 class ConnectionReset(MarkedVisitError):
     markers = ("ERR_CONNECTION_RESET", "ERR_CONNECTION_CLOSED", "ERR_EMPTY_RESPONSE")
     label = "reset"
+    proves_connection = False
 
 
 @frozen
 class TlsFailure(MarkedVisitError):
     markers = ("ERR_SSL", "ERR_CERT")
     label = "tls"
+    proves_connection = True
 
 
 @frozen
 class DnsFailure(MarkedVisitError):
     markers = ("ERR_NAME_NOT_RESOLVED",)
     label = "dns"
+    proves_connection = False
 
 
 @frozen
 class HttpStatus(SiteVisitError):
+    proves_connection = True
     PATTERN: ClassVar[re.Pattern[str]] = re.compile(r"^HTTP (\d+|None)\b")
 
     @classmethod
@@ -146,6 +154,8 @@ class HttpStatus(SiteVisitError):
 
 @frozen
 class UnrecognizedError(SiteVisitError):
+    proves_connection = False
+
     @classmethod
     def matches(cls, raw: str) -> bool:
         return True
@@ -169,6 +179,10 @@ class SiteVisit:
     @classmethod
     def failed(cls, site: Site, url: str, attempts: int, error: SiteVisitError) -> SiteVisit:
         return cls(site, url, ok=False, attempts=attempts, error=error)
+
+    @property
+    def proves_connection(self) -> bool:
+        return self.error is None or self.error.proves_connection
 
     def to_log(self) -> str:
         return f"{self.site.name}: {self.error.to_log()}" if self.error else f"{self.site.name}: ok"

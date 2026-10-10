@@ -15,6 +15,12 @@ MSK_HEALTHY = TunnelCheck(SocksTunnel.alive(MSK, 10000, "vless"), (OPENED,))
 SPB_HEALTHY = TunnelCheck(SocksTunnel.alive(SPB, 10001, "trojan"), (OPENED,))
 SPB_FAILING = TunnelCheck(SocksTunnel.alive(SPB, 10001, "trojan"), (TIMED_OUT,))
 SPB_PARTIAL = TunnelCheck(SocksTunnel.alive(SPB, 10001, "trojan"), (OPENED, TIMED_OUT))
+RATE_LIMITED = SiteVisit.failed(
+    WIKIPEDIA, WIKIPEDIA.url, attempts=3, error=SiteVisitError.from_raw("HTTP 429 from x")
+)
+SPB_ANSWERED_BUT_NOTHING_OPENED = TunnelCheck(
+    SocksTunnel.alive(SPB, 10001, "trojan"), (RATE_LIMITED, RATE_LIMITED)
+)
 
 
 @frozen
@@ -48,6 +54,12 @@ def test_failing_tunnel_is_down_and_not_perfect():
 def test_partial_tunnel_is_up_but_not_perfect():
     metrics = PrometheusMetrics(port=0, instance="probe-1")
     metrics.record([SPB_PARTIAL])
+    assert Scrape(metrics).tunnel_up(SPB) == {"false": 1}
+
+
+def test_connected_tunnel_is_up_even_when_no_page_opened():
+    metrics = PrometheusMetrics(port=0, instance="probe-1")
+    metrics.record([SPB_ANSWERED_BUT_NOTHING_OPENED])
     assert Scrape(metrics).tunnel_up(SPB) == {"false": 1}
 
 
