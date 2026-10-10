@@ -118,7 +118,7 @@
     # UID 1000 is the checker user in the image.
     - name: Write share links
       ansible.builtin.copy:
-        content: "{{ probe_link_files | map('file') | join('\n') }}\n"
+        content: "{{ query('file', *probe_link_files) | join('\n') }}\n"
         dest: "{{ probe_dir }}/links.txt"
         owner: "1000"
         group: "1000"
