@@ -24,7 +24,7 @@ from xray_tun_pwc.domain.sites import SiteCatalog
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="XRC_", frozen=True)
+    model_config = SettingsConfigDict(env_prefix="PWC_", frozen=True)
 
     config_path: Path = Path("config.txt")
     config_lines: tuple[VpnConfigLine, ...] = ()

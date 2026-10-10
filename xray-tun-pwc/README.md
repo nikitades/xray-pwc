@@ -11,7 +11,7 @@ Every few minutes, for every link:
 1. [xray-tun-connect](../xray-tun-connect/) starts a local SOCKS5 tunnel for
    the link.
 2. Chromium opens **heavy sites** through the tunnel. It picks a random site
-   from the heavy list, `XRC_HEAVY_VISITS` times (3 by default). Heavy pages
+   from the heavy list, `PWC_HEAVY_VISITS` times (3 by default). Heavy pages
    are big, so they catch connections that freeze after the first few
    kilobytes.
 3. Chromium opens **every target site** through the tunnel, one after
@@ -31,7 +31,7 @@ Every page gets up to three tries. The wait between tries doubles: 2 s, then
 
 ### The result for a link
 
-| result | meaning | `xrc_tunnel_up` | `perfect` label |
+| result | meaning | `pwc_tunnel_up` | `perfect` label |
 |---|---|---|---|
 | `OK` | every page opened | 1 | `true` |
 | `partial` | some pages opened, some did not | 1 | `false` |
@@ -65,11 +65,11 @@ Errors are short words, so the log is easy to read:
 On `http://<host>:8000/metrics`:
 
 ```
-xrc_tunnel_up{instance="probe-1",tunnel="msk-reality",stable_id="3f9c...",perfect="true"} 1.0
-xrc_tunnel_up{instance="probe-1",tunnel="spb-ws",stable_id="8a01...",perfect="false"} 1.0
+pwc_tunnel_up{instance="probe-1",tunnel="msk-reality",stable_id="3f9c...",perfect="true"} 1.0
+pwc_tunnel_up{instance="probe-1",tunnel="spb-ws",stable_id="8a01...",perfect="false"} 1.0
 ```
 
-- `instance`: the name of this probe (`XRC_INSTANCE`). Compare probes to see
+- `instance`: the name of this probe (`PWC_INSTANCE`). Compare probes to see
   whether the problem is the VPN, one ISP, or one probe.
 - `tunnel`: the link's name, the text after `#` in the link.
 - `stable_id`: a hash of the link without its name. Renaming a link does not
@@ -81,8 +81,8 @@ new series and the old one ends. To draw one continuous line per link, drop
 the label:
 
 ```promql
-max without (perfect) (xrc_tunnel_up)          # is the link up at all
-count by (tunnel) (xrc_tunnel_up{perfect="false"} == 1)   # probes where a link is only partial
+max without (perfect) (pwc_tunnel_up)          # is the link up at all
+count by (tunnel) (pwc_tunnel_up{perfect="false"} == 1)   # probes where a link is only partial
 ```
 
 ## Settings
@@ -91,24 +91,24 @@ All settings are environment variables, and all are optional.
 
 | variable | default | meaning |
 |---|---|---|
-| `XRC_CONFIG_PATH` | `config.txt` | file with share links, one per line, `#` for comments |
-| `XRC_INSTANCE` | hostname | this probe's name in metrics and logs |
-| `XRC_HEAVY_SITES` | Wikipedia random page, The Sun, site123 examples | JSON list of URLs |
-| `XRC_HEAVY_VISITS` | `3` | how many random heavy sites to open per check; `0` skips them |
-| `XRC_TARGET_SITES` | Instagram, Facebook | JSON list of URLs, all opened every check |
-| `XRC_CHECK_INTERVAL` | `PT5M` | time between checks, ISO 8601 |
-| `XRC_CHECK_JITTER` | `PT2M` | random extra wait, so probes don't all check at once |
-| `XRC_HTTP_PORT` | `8000` | port for `/metrics` |
-| `XRC_XRAY_TUN_CONNECT_BIN` | auto | path to `xray-tun-connect` |
+| `PWC_CONFIG_PATH` | `config.txt` | file with share links, one per line, `#` for comments |
+| `PWC_INSTANCE` | hostname | this probe's name in metrics and logs |
+| `PWC_HEAVY_SITES` | Wikipedia random page, The Sun, site123 examples | JSON list of URLs |
+| `PWC_HEAVY_VISITS` | `3` | how many random heavy sites to open per check; `0` skips them |
+| `PWC_TARGET_SITES` | Instagram, Facebook | JSON list of URLs, all opened every check |
+| `PWC_CHECK_INTERVAL` | `PT5M` | time between checks, ISO 8601 |
+| `PWC_CHECK_JITTER` | `PT2M` | random extra wait, so probes don't all check at once |
+| `PWC_HTTP_PORT` | `8000` | port for `/metrics` |
+| `PWC_XRAY_TUN_CONNECT_BIN` | auto | path to `xray-tun-connect` |
 
 Sites are full URLs, not just domains, so you can check one exact page:
 
 ```bash
-export XRC_TARGET_SITES='["https://www.youtube.com/watch?v=dQw4w9WgXcQ", "https://t.me/durov"]'
-export XRC_HEAVY_VISITS=5
+export PWC_TARGET_SITES='["https://www.youtube.com/watch?v=dQw4w9WgXcQ", "https://t.me/durov"]'
+export PWC_HEAVY_VISITS=5
 ```
 
-Without `XRC_XRAY_TUN_CONNECT_BIN`, the binary is looked up in `$GOBIN`,
+Without `PWC_XRAY_TUN_CONNECT_BIN`, the binary is looked up in `$GOBIN`,
 then `$GOPATH/bin` (`~/go/bin` by default), then `PATH`. If it is missing or too old, the program stops with an error.
 When it is missing, the error also says how to install it.
 
@@ -120,7 +120,7 @@ When it is missing, the error also says how to install it.
 make -C ../xray-tun-connect install
 uv sync
 uv run playwright install chromium
-XRC_CONFIG_PATH=links.txt uv run xray-tun-pwc
+PWC_CONFIG_PATH=links.txt uv run xray-tun-pwc
 ```
 
 Stop it with Ctrl+C or `SIGTERM`. It finishes cleanly and closes the tunnels.
@@ -134,7 +134,7 @@ sources as a second build context:
 docker buildx build --build-context xray-tun-connect=../xray-tun-connect -t xray-tun-pwc --load .
 docker run --rm --shm-size 512m \
   -v "$PWD/links.txt:/config/links.txt:ro" \
-  -e XRC_CONFIG_PATH=/config/links.txt -e XRC_INSTANCE=probe-1 \
+  -e PWC_CONFIG_PATH=/config/links.txt -e PWC_INSTANCE=probe-1 \
   -p 8000:8000 xray-tun-pwc
 ```
 

@@ -18,7 +18,7 @@ class PrometheusMetrics(MetricsServer, TunnelMetrics):
         eq=False,
         default=Factory(
             lambda self: Gauge(
-                "xrc_tunnel_up",
+                "pwc_tunnel_up",
                 "1 when at least one site opened through the tunnel; "
                 'perfect="true" when every site opened',
                 ["instance", "tunnel", "stable_id", "perfect"],

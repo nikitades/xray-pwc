@@ -26,7 +26,7 @@ class Scrape:
             sample.labels["perfect"]: sample.value
             for family in self.metrics.registry.collect()
             for sample in family.samples
-            if sample.name == "xrc_tunnel_up"
+            if sample.name == "pwc_tunnel_up"
             and sample.labels["instance"] == self.metrics.instance
             and sample.labels["tunnel"] == config.code
             and sample.labels["stable_id"] == config.stable_id

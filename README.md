@@ -30,7 +30,7 @@ of 2 s, then 4 s. Both lists are plain URLs in the settings.
 
 The link's result is `OK` (every page opened), `partial` (some did) or
 `failed` (none did, or the link could not be started). One metric carries it:
-`xrc_tunnel_up` is 1 when at least one page opened, and its `perfect` label
+`pwc_tunnel_up` is 1 when at least one page opened, and its `perfect` label
 says whether all of them did. It is also labelled with the probe name, the
 link name and a hash of the link that does not change when the link is
 renamed.
@@ -109,7 +109,7 @@ or point the checker at it directly:
 
 ```bash
 chmod +x xray-tun-connect-linux-amd64
-export XRC_XRAY_TUN_CONNECT_BIN="$PWD/xray-tun-connect-linux-amd64"
+export PWC_XRAY_TUN_CONNECT_BIN="$PWD/xray-tun-connect-linux-amd64"
 ```
 
 On macOS, a file downloaded with a browser is quarantined. Clear it with
@@ -123,7 +123,7 @@ uv sync
 uv run playwright install chromium
 
 echo 'vless://...your link...#my-server' > links.txt
-XRC_CONFIG_PATH=links.txt uv run xray-tun-pwc
+PWC_CONFIG_PATH=links.txt uv run xray-tun-pwc
 ```
 
 ```
@@ -144,9 +144,9 @@ Settings and the Docker image are described in
 Each probe exposes one series per link on `http://<probe>:8000/metrics`:
 
 ```
-xrc_tunnel_up{instance="spb-home-1",tunnel="msk-reality",stable_id="3f9c0d2a71e4b6c8",perfect="true"} 1
-xrc_tunnel_up{instance="spb-home-1",tunnel="ams-ws",stable_id="8a01c7d3e9f25b14",perfect="false"} 1
-xrc_tunnel_up{instance="spb-home-1",tunnel="old-trojan",stable_id="c42e6f0b18a9d357",perfect="false"} 0
+pwc_tunnel_up{instance="spb-home-1",tunnel="msk-reality",stable_id="3f9c0d2a71e4b6c8",perfect="true"} 1
+pwc_tunnel_up{instance="spb-home-1",tunnel="ams-ws",stable_id="8a01c7d3e9f25b14",perfect="false"} 1
+pwc_tunnel_up{instance="spb-home-1",tunnel="old-trojan",stable_id="c42e6f0b18a9d357",perfect="false"} 0
 ```
 
 Here `msk-reality` opened every page, `ams-ws` opened some (`partial`), and
@@ -154,7 +154,7 @@ Here `msk-reality` opened every page, `ams-ws` opened some (`partial`), and
 
 | label | meaning |
 |---|---|
-| `instance` | the probe (`XRC_INSTANCE`) |
+| `instance` | the probe (`PWC_INSTANCE`) |
 | `tunnel` | the link name, the text after `#` |
 | `stable_id` | hash of the link without its name; survives renames |
 | `perfect` | `true` when every page opened |
@@ -164,19 +164,19 @@ one continuous line per link. Useful queries:
 
 ```promql
 # is the link up on this probe at all
-max without (perfect) (xrc_tunnel_up)
+max without (perfect) (pwc_tunnel_up)
 
 # links that are up but lose some sites
-xrc_tunnel_up{perfect="false"} == 1
+pwc_tunnel_up{perfect="false"} == 1
 
 # links that are down on every probe: likely the VPN server
-max by (tunnel) (xrc_tunnel_up) == 0
+max by (tunnel) (pwc_tunnel_up) == 0
 
 # probes where every link is down: likely the probe or its ISP
-max by (instance) (xrc_tunnel_up) == 0
+max by (instance) (pwc_tunnel_up) == 0
 
 # share of checks in the last day where the link was up
-avg_over_time((max without (perfect) (xrc_tunnel_up))[1d:5m])
+avg_over_time((max without (perfect) (pwc_tunnel_up))[1d:5m])
 ```
 
 ## Secrets

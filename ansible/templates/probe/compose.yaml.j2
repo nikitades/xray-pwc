@@ -9,10 +9,10 @@ services:
     container_name: xray-tun-pwc
     restart: unless-stopped
     environment:
-      XRC_CONFIG_PATH: /config/links.txt
-      XRC_INSTANCE: "{{ inventory_hostname }}"
-      XRC_CHECK_INTERVAL: "{{ pwc_check_interval }}"
-      XRC_CHECK_JITTER: "{{ pwc_check_jitter }}"
+      PWC_CONFIG_PATH: /config/links.txt
+      PWC_INSTANCE: "{{ inventory_hostname }}"
+      PWC_CHECK_INTERVAL: "{{ pwc_check_interval }}"
+      PWC_CHECK_JITTER: "{{ pwc_check_jitter }}"
     volumes:
       - {{ probe_dir }}/links.txt:/config/links.txt:ro
     # Chromium may run out of the default 64 MB /dev/shm on heavy pages.

@@ -26,7 +26,7 @@ async def test_missing_binary_explains_how_to_install(tmp_path: Path):
     with pytest.raises(XrayTunConnectUnavailable, match="not found") as exc:
         await XrayTunConnectCli(tmp_path / "nope").version()
     assert "make install" in str(exc.value)
-    assert "XRC_XRAY_TUN_CONNECT_BIN" in str(exc.value)
+    assert "PWC_XRAY_TUN_CONNECT_BIN" in str(exc.value)
 
 
 async def test_nothing_installed_anywhere(monkeypatch, tmp_path: Path):

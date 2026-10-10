@@ -21,17 +21,17 @@ def test_defaults():
 
 
 def test_env_overrides(monkeypatch):
-    monkeypatch.setenv("XRC_XRAY_TUN_CONNECT_BIN", "/opt/bin/xray-tun-connect")
+    monkeypatch.setenv("PWC_XRAY_TUN_CONNECT_BIN", "/opt/bin/xray-tun-connect")
     assert Settings().xray_tun_connect_bin == Path("/opt/bin/xray-tun-connect")
 
 
 def test_kwargs_beat_env(monkeypatch, tmp_path):
-    monkeypatch.setenv("XRC_CONFIG_PATH", "/etc/xrc/links.txt")
+    monkeypatch.setenv("PWC_CONFIG_PATH", "/etc/pwc/links.txt")
     assert Settings(config_path=tmp_path / "t.txt").config_path == tmp_path / "t.txt"
 
 
 def test_min_xray_tun_connect_version_is_a_constant(monkeypatch):
-    monkeypatch.setenv("XRC_MIN_XRAY_TUN_CONNECT_VERSION", "9.9.9")
+    monkeypatch.setenv("PWC_MIN_XRAY_TUN_CONNECT_VERSION", "9.9.9")
     assert Settings().get_min_xray_tun_connect_version() == Version("0.1.0")
 
 
@@ -95,21 +95,21 @@ async def test_cli_app_introduces_itself_then_checks_until_stopped(container: Co
 
 
 def test_intervals_are_read_as_iso_8601(monkeypatch):
-    monkeypatch.setenv("XRC_CHECK_INTERVAL", "PT10M")
-    monkeypatch.setenv("XRC_CHECK_JITTER", "PT30S")
+    monkeypatch.setenv("PWC_CHECK_INTERVAL", "PT10M")
+    monkeypatch.setenv("PWC_CHECK_JITTER", "PT30S")
     s = Settings()
     assert (s.check_interval.total_seconds(), s.check_jitter.total_seconds()) == (600, 30)
 
 
 def test_instance_comes_from_the_environment(monkeypatch):
-    monkeypatch.setenv("XRC_INSTANCE", "spb-probe-1")
+    monkeypatch.setenv("PWC_INSTANCE", "spb-probe-1")
     assert Settings().instance == "spb-probe-1"
 
 
 def test_sites_are_configurable_as_json_lists(monkeypatch):
-    monkeypatch.setenv("XRC_HEAVY_SITES", '["https://example.com/big-page"]')
-    monkeypatch.setenv("XRC_TARGET_SITES", '["https://www.youtube.com/watch?v=x", "https://t.me/"]')
-    monkeypatch.setenv("XRC_HEAVY_VISITS", "5")
+    monkeypatch.setenv("PWC_HEAVY_SITES", '["https://example.com/big-page"]')
+    monkeypatch.setenv("PWC_TARGET_SITES", '["https://www.youtube.com/watch?v=x", "https://t.me/"]')
+    monkeypatch.setenv("PWC_HEAVY_VISITS", "5")
     catalog = Settings().get_site_catalog()
     assert [s.url for s in catalog.heavy] == ["https://example.com/big-page"]
     assert [s.name for s in catalog.targets] == ["youtube.com", "t.me"]
@@ -125,6 +125,6 @@ def test_defaults_open_three_heavy_pages_then_instagram_and_facebook():
 
 
 def test_site_urls_are_validated(monkeypatch):
-    monkeypatch.setenv("XRC_TARGET_SITES", '["not a url"]')
+    monkeypatch.setenv("PWC_TARGET_SITES", '["not a url"]')
     with pytest.raises(ValueError):
         Settings()
