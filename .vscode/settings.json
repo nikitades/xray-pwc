@@ -1,0 +1,9 @@
+{
+    "python.analysis.extraPaths": [
+        "xray-tun-pwc/src"
+    ],
+    "ty.configurationFile": ".vscode/ty.toml",
+    "ruff.path": [
+        "${workspaceFolder}/xray-tun-pwc/.venv/bin/ruff"
+    ]
+}

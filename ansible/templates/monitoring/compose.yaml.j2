@@ -1,0 +1,33 @@
+# {{ ansible_managed }}
+name: vpn-monitoring
+
+services:
+  prometheus:
+    image: {{ prom_image }}
+    container_name: vpn-prometheus
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time={{ prom_retention_time }}
+      - --storage.tsdb.retention.size={{ prom_retention_size }}
+      - --web.enable-remote-write-receiver
+    ports:
+      - "127.0.0.1:{{ prom_port }}:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+
+  grafana:
+    image: {{ grafana_image }}
+    container_name: vpn-grafana
+    restart: unless-stopped
+    env_file: grafana.env
+    ports:
+      - "127.0.0.1:{{ grafana_port }}:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+
+volumes:
+  prometheus_data:
+  grafana_data:

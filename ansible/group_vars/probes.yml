@@ -1,0 +1,21 @@
+---
+probe_dir: /opt/xray-tun-pwc
+
+alloy_image: grafana/alloy:v1.20.0
+relay_image: caddy:2.11.7-alpine
+
+# The xray-tun-pwc image is built locally and delivered to the probe as an archive.
+pwc_source_dir: "{{ playbook_dir }}/../xray-tun-pwc"
+pwc_tunnels_source_dir: "{{ playbook_dir }}/../xray-tun-connect"
+pwc_image_arch: "{{ {'x86_64': 'amd64', 'aarch64': 'arm64'}[ansible_architecture] }}"
+pwc_check_interval: PT5M
+pwc_check_jitter: PT2M
+
+# files/probes/<hostname>/*: share links, one per line; all files are joined into one links.txt.
+probe_link_files: "{{ query('fileglob', 'probes/' ~ inventory_hostname ~ '/*') | sort }}"
+
+# Some networks freeze a TCP connection to foreign hosting after ~16 KB, so Alloy
+# sends through a local relay: a new connection for every request, small batches.
+prom_remote_write_upstream: "https://{{ caddy_prometheus_domain }}:{{ caddy_https_port }}"
+prom_remote_write_max_samples: 200
+prom_remote_write_password: "{{ vault_probe_remote_write[inventory_hostname].password }}"

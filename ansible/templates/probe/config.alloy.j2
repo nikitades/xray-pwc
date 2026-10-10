@@ -1,0 +1,69 @@
+// {{ ansible_managed }}
+
+prometheus.exporter.unix "node" {
+  procfs_path = "/host/proc"
+  sysfs_path  = "/host/sys"
+  rootfs_path = "/rootfs"
+}
+
+// The exporter gives targets job="integrations/unix", and the target label
+// wins over the scrape job_name, so it is rewritten here.
+discovery.relabel "node" {
+  targets = prometheus.exporter.unix.node.targets
+
+  rule {
+    target_label = "job"
+    replacement  = "node"
+  }
+
+  rule {
+    target_label = "instance"
+    replacement  = "{{ inventory_hostname }}"
+  }
+}
+
+prometheus.scrape "node" {
+  targets         = discovery.relabel.node.output
+  forward_to      = [prometheus.remote_write.central.receiver]
+  scrape_interval = "30s"
+}
+
+// honor_labels: keep the instance label set by xray-tun-pwc, not the target address.
+prometheus.scrape "xray_tun_pwc" {
+  targets = [
+    {"__address__" = "xray-tun-pwc:8000"},
+  ]
+  forward_to      = [prometheus.remote_write.central.receiver]
+  job_name        = "xray-tun-pwc"
+  honor_labels    = true
+  scrape_interval = "30s"
+}
+
+prometheus.remote_write "central" {
+  external_labels = {
+    host = "{{ inventory_hostname }}",
+  }
+
+  endpoint {
+    url = "http://relay:8080/api/v1/write"
+
+    queue_config {
+      max_samples_per_send = {{ prom_remote_write_max_samples }}
+    }
+
+    metadata_config {
+      send = false
+    }
+
+    basic_auth {
+      username = "{{ inventory_hostname }}"
+      password = sys.env("PROM_PASSWORD")
+    }
+  }
+
+  // The network may be gone for a long time: keep the WAL and send it later.
+  // Prometheus accepts late samples through out_of_order_time_window.
+  wal {
+    max_keepalive_time = "8h"
+  }
+}

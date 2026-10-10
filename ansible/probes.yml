@@ -1,0 +1,164 @@
+---
+- name: VPN probes (xray-tun-pwc + Grafana Alloy)
+  hosts: probes
+  become: true
+  vars_files:
+    - vault.yml
+
+  pre_tasks:
+    - name: Check vault is loaded
+      ansible.builtin.assert:
+        that:
+          - vault_probe_remote_write is defined
+          - inventory_hostname in vault_probe_remote_write
+          - vault_probe_remote_write[inventory_hostname].password | default('') | length > 0
+        fail_msg: vault.yml has no vault_probe_remote_write.{{ inventory_hostname }} with a password, see vault.yml.example
+        quiet: true
+
+    - name: Check share links exist
+      ansible.builtin.assert:
+        that:
+          - probe_link_files | length > 0
+        fail_msg: no link files in files/probes/{{ inventory_hostname }}/
+        quiet: true
+
+  handlers:
+    - name: Restart docker
+      ansible.builtin.systemd_service:
+        name: docker
+        state: restarted
+
+    - name: Restart probe stack
+      community.docker.docker_compose_v2:
+        project_src: "{{ probe_dir }}"
+        state: restarted
+        wait: true
+      when: not ansible_check_mode
+
+  tasks:
+    - name: Docker
+      ansible.builtin.import_tasks: tasks/docker.yml
+
+    # The image tag is a hash of both projects' sources: same code, same tag, nothing rebuilt or resent.
+    - name: Hash checker sources
+      ansible.builtin.shell: >-
+        set -o pipefail;
+        git ls-files -co --exclude-standard -z -- xray-tun-pwc xray-tun-connect
+        | xargs -0 cat
+        | python3 -c 'import hashlib, sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest()[:12])'
+      args:
+        chdir: "{{ playbook_dir }}/.."
+        executable: /bin/bash
+      delegate_to: localhost
+      become: false
+      run_once: true
+      register: pwc_source_hash
+      changed_when: false
+      check_mode: false
+
+    - name: Pick image tag
+      ansible.builtin.set_fact:
+        pwc_image: "xray-tun-pwc:{{ pwc_source_hash.stdout }}-{{ pwc_image_arch }}"
+        pwc_image_archive: "/tmp/xray-tun-pwc-{{ pwc_source_hash.stdout }}-{{ pwc_image_arch }}.tar.gz"
+
+    - name: Check image on the host
+      ansible.builtin.command: docker image inspect {{ pwc_image }}
+      register: pwc_image_on_host
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Deliver image
+      when: pwc_image_on_host.rc != 0
+      block:
+        - name: Build image locally
+          ansible.builtin.command: >-
+            docker buildx build
+            --platform linux/{{ pwc_image_arch }}
+            --build-context xray-tun-connect={{ pwc_tunnels_source_dir }}
+            --tag {{ pwc_image }}
+            --load
+            {{ pwc_source_dir }}
+          delegate_to: localhost
+          become: false
+          throttle: 1
+          changed_when: true
+
+        - name: Export image locally
+          ansible.builtin.shell: set -o pipefail; docker save {{ pwc_image }} | gzip > {{ pwc_image_archive }}
+          args:
+            executable: /bin/bash
+            creates: "{{ pwc_image_archive }}"
+          delegate_to: localhost
+          become: false
+          throttle: 1
+
+        - name: Copy image to the host
+          ansible.builtin.copy:
+            src: "{{ pwc_image_archive }}"
+            dest: "{{ pwc_image_archive }}"
+            mode: "0600"
+
+        - name: Load image on the host
+          ansible.builtin.command: docker load --input {{ pwc_image_archive }}
+          changed_when: true
+
+      always:
+        - name: Remove image archive from the host
+          ansible.builtin.file:
+            path: "{{ pwc_image_archive }}"
+            state: absent
+
+    - name: Create probe directory
+      ansible.builtin.file:
+        path: "{{ probe_dir }}"
+        state: directory
+        mode: "0755"
+
+    # UID 1000 is the checker user in the image.
+    - name: Write share links
+      ansible.builtin.copy:
+        content: "{{ probe_link_files | map('file') | join('\n') }}\n"
+        dest: "{{ probe_dir }}/links.txt"
+        owner: "1000"
+        group: "1000"
+        mode: "0400"
+      no_log: true
+      notify: Restart probe stack
+
+    - name: Template alloy env
+      ansible.builtin.template:
+        src: templates/probe/alloy.env.j2
+        dest: "{{ probe_dir }}/alloy.env"
+        mode: "0600"
+      no_log: true
+      notify: Restart probe stack
+
+    - name: Template alloy config
+      ansible.builtin.template:
+        src: templates/probe/config.alloy.j2
+        dest: "{{ probe_dir }}/config.alloy"
+        mode: "0644"
+      notify: Restart probe stack
+
+    - name: Template relay config
+      ansible.builtin.template:
+        src: templates/probe/Caddyfile.j2
+        dest: "{{ probe_dir }}/Caddyfile"
+        mode: "0644"
+      notify: Restart probe stack
+
+    - name: Template compose file
+      ansible.builtin.template:
+        src: templates/probe/compose.yaml.j2
+        dest: "{{ probe_dir }}/compose.yaml"
+        mode: "0644"
+
+    - name: Bring up probe stack
+      community.docker.docker_compose_v2:
+        project_src: "{{ probe_dir }}"
+        state: present
+        pull: missing
+        remove_orphans: true
+        wait: true
+      when: not ansible_check_mode

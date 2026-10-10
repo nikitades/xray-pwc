@@ -1,0 +1,30 @@
+---
+- name: Check for docker
+  ansible.builtin.command: docker --version
+  register: docker_check
+  changed_when: false
+  failed_when: false
+
+- name: Install docker
+  ansible.builtin.apt:
+    name: "{{ docker_packages }}"
+    state: present
+    update_cache: true
+  when: docker_check.rc != 0
+
+- name: Configure docker daemon
+  ansible.builtin.template:
+    src: templates/daemon.json.j2
+    dest: /etc/docker/daemon.json
+    backup: true
+  notify: Restart docker
+
+- name: Ensure docker is running
+  ansible.builtin.systemd_service:
+    name: docker
+    state: started
+    enabled: true
+
+# daemon.json must apply before the first image pull.
+- name: Flush handlers
+  ansible.builtin.meta: flush_handlers

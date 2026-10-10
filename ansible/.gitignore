@@ -1,0 +1,7 @@
+.vault_pass
+.caddypass
+vault.yml
+collections/
+files/probes/
+*.retry
+inventory.yml

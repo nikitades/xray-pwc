@@ -1,0 +1,9 @@
+---
+# Installed only if Docker is missing.
+# The `docker compose` plugin is docker-compose-v2 on Ubuntu and docker-compose on Debian 13.
+docker_packages:
+  - docker.io
+  - "{{ 'docker-compose-v2' if ansible_distribution == 'Ubuntu' else 'docker-compose' }}"
+
+# Docker Hub mirrors, for networks where Docker Hub is blocked. Example: ["https://mirror.gcr.io"]
+docker_registry_mirrors: []

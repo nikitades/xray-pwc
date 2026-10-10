@@ -1,0 +1,32 @@
+---
+# Removes the xray-tun-pwc stack from the probes, with its data and images.
+- name: Clean the probes
+  hosts: probes
+  become: true
+
+  tasks:
+    - name: Find probe stack
+      ansible.builtin.stat:
+        path: "{{ probe_dir }}/compose.yaml"
+      register: probe_stack
+
+    - name: Stop probe stack
+      community.docker.docker_compose_v2:
+        project_src: "{{ probe_dir }}"
+        state: absent
+        remove_volumes: true
+        remove_orphans: true
+      when: probe_stack.stat.exists and not ansible_check_mode
+
+    - name: Remove probe directory
+      ansible.builtin.file:
+        path: "{{ probe_dir }}"
+        state: absent
+
+    - name: Remove probe images
+      ansible.builtin.shell: >-
+        docker image ls --format '{% raw %}{{.Repository}}:{{.Tag}}{% endraw %}'
+        | grep -E '^(xray-tun-pwc|grafana/alloy|caddy):'
+        | xargs -r docker image rm
+      register: removed_images
+      changed_when: removed_images.stdout | length > 0

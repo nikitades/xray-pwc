@@ -1,0 +1,12 @@
+---
+# cp vault.yml.example vault.yml and fill it in. vault.yml is plain text
+# and git-ignored.
+
+vault_grafana_admin_password: "CHANGE-ME"
+
+# password: the probe sends it with remote write; bcrypt: Caddy checks it.
+# Hash: caddy hash-password --plaintext 'the same password'
+vault_probe_remote_write:
+  probe-1:
+    password: "CHANGE-ME"
+    bcrypt: "$2a$14$CHANGE-ME"

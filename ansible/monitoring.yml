@@ -1,0 +1,93 @@
+---
+- name: Central monitoring server (Prometheus + Grafana + Caddy)
+  hosts: monitoring
+  become: true
+  vars_files:
+    - vault.yml
+
+  pre_tasks:
+    # vars_files silently skips a missing file, so check for it here.
+    - name: Check vault is loaded
+      ansible.builtin.assert:
+        that:
+          - vault_grafana_admin_password is defined
+          - vault_probe_remote_write | default({}) | length > 0
+        fail_msg: vault.yml is missing or incomplete, see vault.yml.example
+        quiet: true
+
+  handlers:
+    - name: Restart docker
+      ansible.builtin.systemd_service:
+        name: docker
+        state: restarted
+
+    - name: Reload caddy
+      ansible.builtin.systemd_service:
+        name: caddy
+        state: reloaded
+
+    - name: Restart monitoring stack
+      community.docker.docker_compose_v2:
+        project_src: "{{ monitoring_dir }}"
+        state: restarted
+        wait: true
+      when: not ansible_check_mode
+
+  tasks:
+    - name: Docker
+      ansible.builtin.import_tasks: tasks/docker.yml
+
+    - name: Create directories
+      ansible.builtin.file:
+        path: "{{ monitoring_dir }}/prometheus"
+        state: directory
+
+    - name: Template prometheus config
+      ansible.builtin.template:
+        src: templates/monitoring/prometheus.yml.j2
+        dest: "{{ monitoring_dir }}/prometheus/prometheus.yml"
+      notify: Restart monitoring stack
+
+    - name: Template grafana env
+      ansible.builtin.template:
+        src: templates/monitoring/grafana.env.j2
+        dest: "{{ monitoring_dir }}/grafana.env"
+        mode: "0600"
+      no_log: true
+      notify: Restart monitoring stack
+
+    - name: Template compose file
+      ansible.builtin.template:
+        src: templates/monitoring/compose.yaml.j2
+        dest: "{{ monitoring_dir }}/compose.yaml"
+
+    - name: Bring up monitoring stack
+      community.docker.docker_compose_v2:
+        project_src: "{{ monitoring_dir }}"
+        state: present
+        pull: missing
+        remove_orphans: true
+        wait: true
+      when: not ansible_check_mode
+
+    - name: Install caddy
+      ansible.builtin.apt:
+        name: caddy
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    # validate: a broken Caddyfile never reaches the disk.
+    - name: Template Caddyfile
+      ansible.builtin.template:
+        src: templates/monitoring/Caddyfile.j2
+        dest: /etc/caddy/Caddyfile
+        backup: true
+        validate: caddy validate --adapter caddyfile --config %s
+      notify: Reload caddy
+
+    - name: Ensure caddy is running
+      ansible.builtin.systemd_service:
+        name: caddy
+        state: started
+        enabled: true

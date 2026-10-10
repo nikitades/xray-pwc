@@ -1,0 +1,46 @@
+# {{ ansible_managed }}
+name: xray-tun-pwc
+
+services:
+  # Starts xray-tun-connect tunnels and opens sites through them in Chromium on
+  # every check. Metrics on port 8000 are not published; alloy scrapes them.
+  xray-tun-pwc:
+    image: {{ pwc_image }}
+    container_name: xray-tun-pwc
+    restart: unless-stopped
+    environment:
+      XRC_CONFIG_PATH: /config/links.txt
+      XRC_INSTANCE: "{{ inventory_hostname }}"
+      XRC_CHECK_INTERVAL: "{{ pwc_check_interval }}"
+      XRC_CHECK_JITTER: "{{ pwc_check_jitter }}"
+    volumes:
+      - {{ probe_dir }}/links.txt:/config/links.txt:ro
+    # Chromium may run out of the default 64 MB /dev/shm on heavy pages.
+    shm_size: 512m
+
+  relay:
+    image: {{ relay_image }}
+    container_name: xray-tun-pwc-relay
+    restart: unless-stopped
+    volumes:
+      - {{ probe_dir }}/Caddyfile:/etc/caddy/Caddyfile:ro
+
+  alloy:
+    image: {{ alloy_image }}
+    container_name: xray-tun-pwc-alloy
+    restart: unless-stopped
+    command:
+      - run
+      - /etc/alloy/config.alloy
+      - --storage.path=/var/lib/alloy/data
+      - --disable-reporting
+    env_file: {{ probe_dir }}/alloy.env
+    volumes:
+      - {{ probe_dir }}/config.alloy:/etc/alloy/config.alloy:ro
+      - alloy_data:/var/lib/alloy/data
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+
+volumes:
+  alloy_data:

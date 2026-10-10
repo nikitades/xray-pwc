@@ -1,0 +1,19 @@
+---
+# Copy to inventory.yml (git-ignored) and fill in your hosts and domains.
+all:
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+    caddy_grafana_domain: grafana.example.com
+    caddy_prometheus_domain: prometheus.example.com
+    caddy_https_port: 443
+  children:
+    monitoring:
+      hosts:
+        mon-1:
+          ansible_host: monitor.example.com
+          ansible_user: root
+
+    probes:
+      hosts:
+        probe-1:
+          ansible_host: probe-1.example.com

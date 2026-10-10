@@ -1,0 +1,3 @@
+[environment]
+root = ["xray-tun-pwc/src"]
+python = "xray-tun-pwc/.venv"
