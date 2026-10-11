@@ -1,0 +1,16 @@
+# {{ ansible_managed }}
+[Interface]
+PrivateKey = {{ vpnc_net_private_key }}
+Address = {{ vpnc_net_ip }}/{{ vpnc_net_subnet.split('/')[1] }}
+ListenPort = {{ vpnc_net_port }}
+MTU = {{ vpnc_net_mtu }}
+{% include 'obfuscation.j2' %}
+PostUp = {{ vpnc_net_conf_dir }}/firewall.sh up
+PostDown = {{ vpnc_net_conf_dir }}/firewall.sh down
+{% for host in vpnc_net_members if host != inventory_hostname %}
+
+[Peer]
+# {{ host }}
+PublicKey = {{ hostvars[host].vpnc_net_public_key }}
+AllowedIPs = {{ hostvars[host].vpnc_net_ip }}/32
+{% endfor %}

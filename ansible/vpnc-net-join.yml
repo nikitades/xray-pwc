@@ -1,0 +1,257 @@
+---
+# Adds a machine to vpnc-net.
+#   a probe:       ansible-playbook vpnc-net-join.yml -e name=<name> -e ssh_user=<user> [-e arch=arm64]
+#   your laptop:   ansible-playbook vpnc-net-join.yml -e name=<name> -e group=vpnc_net_peers
+#   the server:    ansible-playbook vpnc-net-join.yml -e name=<the monitoring host>
+# Writes host_vars/<name>/vpnc-net.yml (address and keys) and, for a new machine,
+# inventory.d/<name>.yml, and tells the server. Then makes, in files/vpnc-net/join:
+#   - for a probe: <name>-<arch>.sh, one encrypted file that sets the tunnel up; with
+#     files/probes/<name>/service_links.txt already in place, the tunnel goes through those links;
+#   - for vpnc_net_peers (your laptop, an admin member): <name>.conf for the AmneziaWG app;
+#   - <name>.txt: what to do next.
+# For the vpnc-net server (the monitoring host) it only writes the keys.
+# Running it again for the same name keeps the address and the keys.
+
+- name: Register the vpnc-net member
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    join_group: "{{ group | default('probes') }}"
+    join_dir: "{{ playbook_dir }}/host_vars/{{ name }}"
+    join_used_ips: "{{ groups['all'] | map('extract', hostvars) | selectattr('vpnc_net_ip', 'defined') | map(attribute='vpnc_net_ip') | list }}"
+    join_prefix: "{{ vpnc_net_subnet.split('/')[0].rsplit('.', 1)[0] }}"
+    # The server is .1; the rest get the first free address from .10.
+    join_ip: "{{ join_prefix ~ '.1' if name == vpnc_net_server else range(10, 255) | map('string') | map('regex_replace', '^', join_prefix ~ '.') | reject('in', join_used_ips) | first }}"
+
+  tasks:
+    - name: Check parameters
+      ansible.builtin.assert:
+        that:
+          - name | default('') is match('^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$')
+          - join_group in ['probes', 'vpnc_net_peers']
+          - name in groups['all'] or join_group == 'vpnc_net_peers' or ssh_user | default('') | length > 0
+        fail_msg: >-
+          -e name=<name> -e ssh_user=<user on the machine> [-e arch=arm64] for a probe,
+          or -e name=<name> -e group=vpnc_net_peers for your laptop. A name is a DNS
+          label: lowercase letters, digits and dashes.
+        quiet: true
+
+    - name: Find member settings
+      ansible.builtin.stat:
+        path: "{{ join_dir }}/vpnc-net.yml"
+      register: join_member
+
+    - name: Pick address and keys
+      when: not join_member.stat.exists
+      block:
+        # Raw X25519 keys in base64, the WireGuard format: the last 32 bytes of the DER.
+        - name: Generate key pair
+          ansible.builtin.shell: |
+            set -euo pipefail
+            der=$(openssl genpkey -algorithm X25519 -outform DER | base64)
+            echo "$der" | base64 -d | tail -c 32 | base64
+            echo "$der" | base64 -d | openssl pkey -inform DER -pubout -outform DER | tail -c 32 | base64
+          args:
+            executable: /bin/bash
+          register: join_keys
+          changed_when: true
+          no_log: true
+
+        - name: Create host_vars directory
+          ansible.builtin.file:
+            path: "{{ join_dir }}"
+            state: directory
+            mode: "0700"
+
+        - name: Write member settings
+          ansible.builtin.template:
+            src: templates/vpnc-net/member.yml.j2
+            dest: "{{ join_dir }}/vpnc-net.yml"
+            mode: "0600"
+          no_log: true
+
+    - name: Add to inventory
+      ansible.builtin.template:
+        src: templates/vpnc-net/inventory.yml.j2
+        dest: "{{ playbook_dir }}/inventory.d/{{ name }}.yml"
+        mode: "0644"
+      when: name not in groups['all']
+
+    - name: Reload inventory
+      ansible.builtin.meta: refresh_inventory
+
+- name: Tell the vpnc-net server
+  hosts: monitoring
+  become: true
+  vars_files:
+    - vault.yml
+
+  handlers:
+    - name: Vpnc-net handlers
+      ansible.builtin.import_tasks: handlers/vpnc-net.yml
+
+  tasks:
+    - name: Vpnc-net tunnel
+      ansible.builtin.import_tasks: tasks/vpnc-net.yml
+
+- name: Make the join file
+  hosts: "{{ name }}"
+  gather_facts: false
+  become: false
+  vars_files:
+    - vault.yml
+  vars:
+    vpnc_net_arch: "{{ arch | default('amd64') }}"
+    vpnc_net_join_machine: "{{ {'amd64': 'x86_64', 'arm64': 'aarch64'}[vpnc_net_arch] }}"
+    vpnc_net_join_file: "{{ vpnc_net_join_dir }}/{{ inventory_hostname }}-{{ vpnc_net_arch }}.sh"
+    vpnc_net_join_conf: "{{ vpnc_net_join_dir }}/{{ inventory_hostname }}.conf"
+    vpnc_net_join_stage: "{{ vpnc_net_join_dir }}/.{{ inventory_hostname }}"
+    vpnc_net_join_laptop: "{{ inventory_hostname in groups.get('vpnc_net_peers', []) }}"
+    vpnc_net_join_server: "{{ inventory_hostname == vpnc_net_server }}"
+
+  tasks:
+    - name: Check vault is loaded
+      ansible.builtin.assert:
+        that: vault_vpnc_net_obfuscation is defined
+        fail_msg: vault.yml has no vault_vpnc_net_obfuscation, see vault.yml.example
+        quiet: true
+      delegate_to: localhost
+
+    - name: Create join directory
+      ansible.builtin.file:
+        path: "{{ vpnc_net_join_dir }}"
+        state: directory
+        mode: "0700"
+      delegate_to: localhost
+
+    - name: Write AmneziaWG app config
+      ansible.builtin.template:
+        src: templates/vpnc-net/peer.conf.j2
+        dest: "{{ vpnc_net_join_conf }}"
+        mode: "0600"
+      no_log: true
+      delegate_to: localhost
+      when: vpnc_net_join_laptop
+
+    - name: Build join file
+      when: not vpnc_net_join_laptop and not vpnc_net_join_server
+      block:
+        - name: Build AmneziaWG
+          ansible.builtin.import_tasks: tasks/vpnc-net-build.yml
+
+        - name: Build xray-tun-connect
+          ansible.builtin.include_tasks: tasks/vpnc-net-build-via.yml
+          when: vpnc_net_via
+
+        - name: Create staging directory
+          ansible.builtin.file:
+            path: "{{ vpnc_net_join_stage }}/bin"
+            state: directory
+            mode: "0700"
+          delegate_to: localhost
+
+        # The same templates as probes.yml, so Ansible later finds nothing to change.
+        - name: Template tunnel files
+          ansible.builtin.template:
+            src: templates/vpnc-net/{{ item.src }}
+            dest: "{{ vpnc_net_join_stage }}/{{ item.dest }}"
+            mode: "0600"
+          loop:
+            - { src: client.conf.j2, dest: "{{ vpnc_net_interface }}.conf" }
+            - { src: firewall.sh.j2, dest: firewall.sh }
+            - { src: vpnc-net.service.j2, dest: vpnc-net.service }
+            - { src: install.sh.j2, dest: install.sh }
+            - { src: vpnc-net-via.service.j2, dest: vpnc-net-via.service, via: true }
+          when: vpnc_net_via or not item.via | default(false)
+          loop_control:
+            label: "{{ item.dest }}"
+          no_log: true
+          delegate_to: localhost
+
+        - name: Copy binaries and helpers
+          ansible.builtin.copy:
+            src: "{{ item.src }}"
+            dest: "{{ vpnc_net_join_stage }}/{{ item.dest }}"
+            mode: "0600"
+          loop:
+            - { src: "{{ vpnc_net_bin_cache }}/amneziawg-go", dest: bin/amneziawg-go }
+            - { src: "{{ vpnc_net_bin_cache }}/awg", dest: bin/awg }
+            - { src: "{{ vpnc_net_bin_cache }}/awg-quick", dest: bin/awg-quick }
+            - { src: files/vpnc_net_check_subnet.py, dest: vpnc_net_check_subnet.py }
+            - { src: "{{ vpnc_net_ssh_public_key | expanduser }}", dest: ssh.pub }
+            - { src: "{{ vpnc_net_via_bin }}", dest: bin/xray-tun-connect, via: true }
+          when: vpnc_net_via or not item.via | default(false)
+          loop_control:
+            label: "{{ item.dest }}"
+          delegate_to: localhost
+
+        - name: Write service links
+          ansible.builtin.copy:
+            content: "{{ vpnc_net_via_links }}"
+            dest: "{{ vpnc_net_join_stage }}/service_links.txt"
+            mode: "0600"
+          no_log: true
+          delegate_to: localhost
+          when: vpnc_net_via
+
+        - name: Template join header
+          ansible.builtin.template:
+            src: templates/vpnc-net/join.sh.j2
+            dest: "{{ vpnc_net_join_stage }}.header"
+            mode: "0600"
+          delegate_to: localhost
+
+        - name: Make passphrase
+          ansible.builtin.command: openssl rand -hex 16
+          register: vpnc_net_join_pass
+          changed_when: false
+          no_log: true
+          delegate_to: localhost
+
+        # No macOS ._ files and xattrs in the archive: GNU tar warns about them.
+        - name: Pack and encrypt
+          ansible.builtin.shell: |
+            set -euo pipefail
+            COPYFILE_DISABLE=1 tar --no-xattrs -C "{{ vpnc_net_join_stage }}" -czf - . \
+              | openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:VPNC_NET_JOIN_PASS \
+              > "{{ vpnc_net_join_stage }}.payload"
+            cat "{{ vpnc_net_join_stage }}.header" "{{ vpnc_net_join_stage }}.payload" > "{{ vpnc_net_join_file }}"
+            chmod 0600 "{{ vpnc_net_join_file }}"
+          args:
+            executable: /bin/bash
+          environment:
+            VPNC_NET_JOIN_PASS: "{{ vpnc_net_join_pass.stdout }}"
+          changed_when: true
+          delegate_to: localhost
+
+        - name: Hash join file
+          ansible.builtin.shell: >-
+            echo "$(du -h "{{ vpnc_net_join_file }}" | cut -f1),
+            sha256 $(openssl dgst -sha256 -r "{{ vpnc_net_join_file }}" | cut -d' ' -f1)"
+          register: vpnc_net_join_sum
+          changed_when: false
+          delegate_to: localhost
+
+      always:
+        - name: Remove staging files
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - "{{ vpnc_net_join_stage }}"
+            - "{{ vpnc_net_join_stage }}.header"
+            - "{{ vpnc_net_join_stage }}.payload"
+          delegate_to: localhost
+
+    - name: Write next steps
+      ansible.builtin.template:
+        src: templates/vpnc-net/join-note.txt.j2
+        dest: "{{ vpnc_net_join_dir }}/{{ inventory_hostname }}.txt"
+        mode: "0600"
+      no_log: true
+      delegate_to: localhost
+
+    - name: Show next steps
+      ansible.builtin.debug:
+        msg: "{{ lookup('file', vpnc_net_join_dir ~ '/' ~ inventory_hostname ~ '.txt').splitlines() }}"

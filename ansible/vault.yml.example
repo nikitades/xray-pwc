@@ -4,9 +4,16 @@
 
 vault_grafana_admin_password: "CHANGE-ME"
 
-# password: the probe sends it with remote write; bcrypt: Caddy checks it.
-# Hash: caddy hash-password --plaintext 'the same password'
-vault_probe_remote_write:
-  probe-1:
-    password: "CHANGE-ME"
-    bcrypt: "$2a$14$CHANGE-ME"
+# vpnc-net: the keys are not here, vpnc-net-join.yml writes them to host_vars/<name>/vpnc-net.yml.
+# The same on every peer. Pick your own: S1 and S2 in 15..150 with S1 + 56 != S2,
+# H1..H4 four different numbers from 5 to 2147483647.
+vault_vpnc_net_obfuscation:
+  jc: 4
+  jmin: 40
+  jmax: 70
+  s1: 0
+  s2: 0
+  h1: 0
+  h2: 0
+  h3: 0
+  h4: 0

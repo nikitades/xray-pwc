@@ -5,3 +5,8 @@ collections/
 files/probes/
 *.retry
 inventory.yml
+files/vpnc-net/
+# Per-machine vpnc-net settings and keys, written by vpnc-net-join.yml and probes.yml.
+host_vars/
+inventory.d/*
+!inventory.d/.gitkeep

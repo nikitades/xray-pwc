@@ -88,10 +88,17 @@ func linkName(link string) string {
 	return name
 }
 
+// DirectLink is not a share link: it stands for "no VPN", a direct connection
+// from this machine. Forward mode puts it last in the rotation.
+const DirectLink = "direct://#direct"
+
 // parseLink converts one share link into a raw xray outbound and reports its
 // protocol. Links are parsed one at a time so a bad one is attributed to its
 // own index instead of being silently dropped from a batch.
 func parseLink(link string) (outbound json.RawMessage, protocol string, err error) {
+	if link == DirectLink {
+		return json.RawMessage(`{"protocol":"freedom"}`), "direct", nil
+	}
 	cfg, err := share.ConvertShareLinksToXrayJson(link, "")
 	if err != nil {
 		return nil, "", err

@@ -13,15 +13,27 @@ import (
 func inboundTag(i int) string  { return fmt.Sprintf("in_%d", i) }
 func outboundTag(i int) string { return fmt.Sprintf("out_%d", i) }
 
-// buildConfig assembles one xray config: a SOCKS inbound per live tunnel on
+const checkTag = "check"
+
+func firstOK(tunnels []Tunnel) int {
+	for i, t := range tunnels {
+		if t.OK {
+			return i
+		}
+	}
+	return -1
+}
+
+// buildConfig assembles one xray config: an inbound per live tunnel on
 // listen:port, its outbound, and a routing rule pinning the two together.
+// The inbound is SOCKS, or with opts.Forward a plain TCP and UDP forward.
 func buildConfig(tunnels []Tunnel, outbounds []json.RawMessage, opts Options) ([]byte, error) {
 	var inbounds, outs, rules []any
 	for i, t := range tunnels {
 		if !t.OK {
 			continue
 		}
-		inbounds = append(inbounds, map[string]any{
+		in := map[string]any{
 			"tag":      inboundTag(i),
 			"listen":   opts.Listen,
 			"port":     t.Port,
@@ -29,7 +41,27 @@ func buildConfig(tunnels []Tunnel, outbounds []json.RawMessage, opts Options) ([
 			"settings": map[string]any{"auth": "noauth", "udp": true},
 			// Sniff for routing only, never rewrite the destination.
 			"sniffing": map[string]any{"enabled": true, "destOverride": []string{"http", "tls", "quic"}, "routeOnly": true},
-		})
+		}
+		if opts.Forward != nil {
+			in["protocol"] = "tunnel"
+			in["settings"] = map[string]any{"address": opts.Forward.Host, "port": opts.Forward.Port, "network": "tcp,udp"}
+			delete(in, "sniffing")
+		}
+		inbounds = append(inbounds, in)
+		if opts.CheckPort != 0 && i == firstOK(tunnels) {
+			inbounds = append(inbounds, map[string]any{
+				"tag":      checkTag,
+				"listen":   "127.0.0.1",
+				"port":     opts.CheckPort,
+				"protocol": "socks",
+				"settings": map[string]any{"auth": "noauth"},
+			})
+			rules = append(rules, map[string]any{
+				"type":        "field",
+				"inboundTag":  []string{checkTag},
+				"outboundTag": outboundTag(i),
+			})
+		}
 		var ob map[string]any
 		if err := json.Unmarshal(outbounds[i], &ob); err != nil {
 			return nil, fmt.Errorf("outbound %d: %w", i, err)

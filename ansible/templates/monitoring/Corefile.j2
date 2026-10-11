@@ -1,0 +1,13 @@
+# {{ ansible_managed }}
+{{ vpnc_net_domain }} {
+	hosts /etc/coredns/vpnc-net.hosts
+	reload
+	errors
+}
+
+. {
+	forward . 1.1.1.1 8.8.8.8
+	cache 300
+	reload
+	errors
+}

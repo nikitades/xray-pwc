@@ -1,0 +1,30 @@
+---
+# Handlers for tasks/vpnc-net.yml. Ansible may be talking to the host through
+# this very tunnel, so a restart is queued (--no-block) and Ansible waits for
+# the connection to come back.
+
+# The transport goes first: the tunnel may be about to send to it.
+- name: Restart vpnc-net-via
+  ansible.builtin.shell: systemctl daemon-reload && systemctl restart --no-block vpnc-net-via
+  when: not ansible_check_mode
+  notify: Wait for vpnc-net
+
+- name: Stop vpnc-net-via
+  ansible.builtin.shell: systemctl daemon-reload && { systemctl disable --now vpnc-net-via 2>/dev/null || true; }
+  when: not ansible_check_mode
+
+- name: Restart vpnc-net
+  ansible.builtin.shell: systemctl daemon-reload && systemctl restart --no-block vpnc-net
+  when: not ansible_check_mode
+  notify: Wait for vpnc-net
+
+- name: Reload vpnc-net
+  ansible.builtin.systemd_service:
+    name: vpnc-net
+    state: reloaded
+  when: not ansible_check_mode
+
+- name: Wait for vpnc-net
+  ansible.builtin.wait_for_connection:
+    delay: 5
+    timeout: 120

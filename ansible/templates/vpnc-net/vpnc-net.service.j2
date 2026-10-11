@@ -1,0 +1,25 @@
+# {{ ansible_managed }}
+[Unit]
+Description=vpnc-net AmneziaWG tunnel ({{ vpnc_net_interface }})
+After=network-online.target nss-lookup.target
+Wants=network-online.target nss-lookup.target
+{% if vpnc_net_via | default(false) %}
+After=vpnc-net-via.service
+Wants=vpnc-net-via.service
+{% endif %}
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Our own awg first, apart from any packaged amneziawg.
+Environment=PATH={{ vpnc_net_bin_dir }}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=WG_QUICK_USERSPACE_IMPLEMENTATION={{ vpnc_net_bin_dir }}/amneziawg-go
+Environment=WG_ENDPOINT_RESOLUTION_RETRIES=infinity
+ExecStart={{ vpnc_net_bin_dir }}/awg-quick up {{ vpnc_net_conf_dir }}/{{ vpnc_net_interface }}.conf
+ExecStop={{ vpnc_net_bin_dir }}/awg-quick down {{ vpnc_net_conf_dir }}/{{ vpnc_net_interface }}.conf
+# Peers and firewall rules; a new address or MTU needs a restart.
+ExecReload=/bin/bash -c 'exec awg syncconf {{ vpnc_net_interface }} <(exec awg-quick strip {{ vpnc_net_conf_dir }}/{{ vpnc_net_interface }}.conf)'
+ExecReload={{ vpnc_net_conf_dir }}/firewall.sh up
+
+[Install]
+WantedBy=multi-user.target

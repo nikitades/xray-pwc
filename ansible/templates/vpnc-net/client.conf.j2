@@ -1,0 +1,21 @@
+# {{ ansible_managed }}
+# Only {{ vpnc_net_subnet }} goes through the tunnel: no default route, no DNS.
+[Interface]
+PrivateKey = {{ vpnc_net_private_key }}
+Address = {{ vpnc_net_ip }}/32
+MTU = {{ vpnc_net_mtu }}
+{% include 'obfuscation.j2' %}
+PostUp = {{ vpnc_net_conf_dir }}/firewall.sh up
+PostDown = {{ vpnc_net_conf_dir }}/firewall.sh down
+
+[Peer]
+# {{ vpnc_net_server }}
+PublicKey = {{ hostvars[vpnc_net_server].vpnc_net_public_key }}
+{% if vpnc_net_via %}
+# Through a service link: vpnc-net-via forwards this port to {{ vpnc_net_endpoint }}.
+Endpoint = 127.0.0.1:{{ vpnc_net_via_port }}
+{% else %}
+Endpoint = {{ vpnc_net_endpoint }}
+{% endif %}
+AllowedIPs = {{ vpnc_net_subnet }}
+PersistentKeepalive = {{ vpnc_net_keepalive }}

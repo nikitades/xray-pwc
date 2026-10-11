@@ -1,0 +1,18 @@
+---
+# Builds AmneziaWG for vpnc_net_arch on this machine, once per version and CPU type.
+- name: Build AmneziaWG locally
+  ansible.builtin.command:
+    cmd: >-
+      docker run --rm --platform linux/{{ vpnc_net_arch }} -v {{ vpnc_net_bin_cache }}:/out {{ vpnc_net_build_image }}
+      bash -euc '
+      git -c advice.detachedHead=false clone -q --depth 1 -b {{ vpnc_net_go_version }} https://github.com/amnezia-vpn/amneziawg-go /src/go;
+      make -C /src/go;
+      git -c advice.detachedHead=false clone -q --depth 1 -b {{ vpnc_net_tools_version }} https://github.com/amnezia-vpn/amneziawg-tools /src/tools;
+      make -C /src/tools/src wg;
+      install -m 0755 /src/go/amneziawg-go /out/amneziawg-go;
+      install -m 0755 /src/tools/src/wg /out/awg;
+      install -m 0755 /src/tools/src/wg-quick/linux.bash /out/awg-quick'
+    creates: "{{ vpnc_net_bin_cache }}/awg-quick"
+  delegate_to: localhost
+  become: false
+  throttle: 1

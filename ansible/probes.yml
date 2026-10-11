@@ -6,15 +6,6 @@
     - vault.yml
 
   pre_tasks:
-    - name: Check vault is loaded
-      ansible.builtin.assert:
-        that:
-          - vault_probe_remote_write is defined
-          - inventory_hostname in vault_probe_remote_write
-          - vault_probe_remote_write[inventory_hostname].password | default('') | length > 0
-        fail_msg: vault.yml has no vault_probe_remote_write.{{ inventory_hostname }} with a password, see vault.yml.example
-        quiet: true
-
     - name: Check share links exist
       ansible.builtin.assert:
         that:
@@ -23,6 +14,9 @@
         quiet: true
 
   handlers:
+    - name: Vpnc-net handlers
+      ansible.builtin.import_tasks: handlers/vpnc-net.yml
+
     - name: Restart docker
       ansible.builtin.systemd_service:
         name: docker
@@ -36,6 +30,13 @@
       when: not ansible_check_mode
 
   tasks:
+    # Metrics go to Prometheus through it, and later runs connect through it.
+    - name: Vpnc-net tunnel
+      ansible.builtin.import_tasks: tasks/vpnc-net.yml
+
+    - name: Vpnc-net SSH
+      ansible.builtin.import_tasks: tasks/vpnc-net-ssh.yml
+
     - name: Docker
       ansible.builtin.import_tasks: tasks/docker.yml
 
@@ -126,14 +127,6 @@
       no_log: true
       notify: Restart probe stack
 
-    - name: Template alloy env
-      ansible.builtin.template:
-        src: templates/probe/alloy.env.j2
-        dest: "{{ probe_dir }}/alloy.env"
-        mode: "0600"
-      no_log: true
-      notify: Restart probe stack
-
     - name: Template alloy config
       ansible.builtin.template:
         src: templates/probe/config.alloy.j2
@@ -161,4 +154,15 @@
         pull: missing
         remove_orphans: true
         wait: true
+      when: not ansible_check_mode
+
+    # Every code change leaves a 1-1.5 GB image behind; only the running one stays.
+    - name: Remove old checker images
+      ansible.builtin.shell: >-
+        docker image ls --format '{% raw %}{{.Repository}}:{{.Tag}}{% endraw %}'
+        | grep '^xray-tun-pwc:'
+        | grep -vxF '{{ pwc_image }}'
+        | xargs -r docker image rm
+      register: pwc_old_images
+      changed_when: pwc_old_images.stdout | length > 0
       when: not ansible_check_mode

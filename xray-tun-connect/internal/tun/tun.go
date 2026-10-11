@@ -1,5 +1,5 @@
 // Package tun starts one xray-core instance that exposes every share link as
-// a local SOCKS5 inbound on a predictable port.
+// a local SOCKS5 inbound (or a forward to one address) on a predictable port.
 package tun
 
 import (
@@ -26,6 +26,31 @@ type Options struct {
 	Listen       string
 	XrayLogLevel string
 	ReadyTimeout time.Duration
+	// Forward, when set, makes every inbound send everything it gets to this
+	// one address through its link, instead of being a SOCKS proxy.
+	Forward *Target
+	// CheckPort, when set, adds a SOCKS inbound on 127.0.0.1 for the first
+	// link, for Forward's health probe through the link.
+	CheckPort int
+}
+
+// Target is a host and port at the far end of a forward.
+type Target struct {
+	Host string
+	Port int
+}
+
+// ParseTarget reads host:port.
+func ParseTarget(s string) (*Target, error) {
+	host, portStr, err := net.SplitHostPort(s)
+	if err != nil {
+		return nil, err
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil || port < 1 || port > 65535 || host == "" {
+		return nil, fmt.Errorf("%q is not host:port", s)
+	}
+	return &Target{Host: host, Port: port}, nil
 }
 
 // Tunnel is one entry of the report. A link that could not be used keeps its

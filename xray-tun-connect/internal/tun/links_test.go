@@ -82,3 +82,13 @@ func TestReadLinkBlock(t *testing.T) {
 		})
 	}
 }
+
+func TestDirectLink(t *testing.T) {
+	ob, proto, err := parseLink(DirectLink)
+	if err != nil || proto != "direct" || string(ob) != `{"protocol":"freedom"}` {
+		t.Errorf("parseLink(DirectLink) = %s, %q, %v", ob, proto, err)
+	}
+	if got := linkName(DirectLink); got != "direct" {
+		t.Errorf("linkName(DirectLink) = %q", got)
+	}
+}

@@ -7,3 +7,59 @@ docker_packages:
 
 # Docker Hub mirrors, for networks where Docker Hub is blocked. Example: ["https://mirror.gcr.io"]
 docker_registry_mirrors: []
+
+# vpnc-net: a private AmneziaWG network. The server is the monitoring host; the probes
+# and the vpnc_net_peers group (your laptop) are clients. Only vpnc_net_subnet goes into the
+# tunnel: no default route, no DNS changes, so other VPNs on the same machines keep
+# working. Every member has host_vars/<name>/vpnc-net.yml with vpnc_net_ip and its keys,
+# written by vpnc-net-join.yml.
+vpnc_net_interface: vpnc-net
+# A /24: vpnc-net-join.yml hands out .1 to the server and .10 to .254 to the rest.
+vpnc_net_subnet: 10.213.97.0/24
+vpnc_net_port: 51973
+# Low enough for a tunnel inside another VPN.
+vpnc_net_mtu: 1280
+vpnc_net_keepalive: 25
+vpnc_net_domain: vpnc-net.internal
+vpnc_net_server: "{{ groups.monitoring[0] }}"
+vpnc_net_server_ip: "{{ hostvars[vpnc_net_server].vpnc_net_ip }}"
+vpnc_net_endpoint: "{{ caddy_grafana_domain }}:{{ vpnc_net_port }}"
+vpnc_net_members: "{{ groups['all'] | map('extract', hostvars) | selectattr('vpnc_net_ip', 'defined') | map(attribute='inventory_hostname') | list }}"
+# Admin members (vpnc_net_admin: true) reach every other member; the rest only reach the server.
+vpnc_net_admin_ips: "{{ groups['all'] | map('extract', hostvars) | selectattr('vpnc_net_admin', 'defined') | selectattr('vpnc_net_admin') | map(attribute='vpnc_net_ip') | list }}"
+
+# SSH to the probes goes through vpnc-net. The public key vpnc_net_ssh_key is put on every
+# probe; set it in inventory.yml (not defaulted here: this file would override
+# all.vars from the inventory). Host keys of vpnc-net addresses are trusted on first
+# use: the tunnel itself already proves who is on the other end.
+vpnc_net_ssh_public_key: "{{ vpnc_net_ssh_key | default('~/.ssh/id_ed25519.pub') }}"
+vpnc_net_ssh_private_key: "{{ vpnc_net_ssh_public_key | regex_replace('\\.pub$', '') }}"
+vpnc_net_ssh_args: -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new
+
+# Userspace AmneziaWG (no kernel module), built locally from source like the probe image.
+# Everything lives in its own directories, apart from any packaged amneziawg.
+vpnc_net_go_version: v3.1.20260828
+vpnc_net_tools_version: v3.1.20260812
+vpnc_net_build_image: golang:1.25.1-bookworm
+vpnc_net_arch: "{{ {'x86_64': 'amd64', 'aarch64': 'arm64'}[ansible_facts['architecture']] }}"
+vpnc_net_bin_cache: "{{ playbook_dir }}/files/vpnc-net/bin/{{ vpnc_net_go_version }}-{{ vpnc_net_tools_version }}-{{ vpnc_net_arch }}"
+vpnc_net_bin_dir: /opt/vpnc-net/bin
+vpnc_net_conf_dir: /etc/vpnc-net
+
+# files/probes/<host>/service_links.txt: share links for the probe's own traffic, one
+# per line, apart from the links it reports on. With it, the tunnel goes to the server
+# through one of them, for networks that block UDP to it; without it, straight.
+vpnc_net_service_links: "{{ playbook_dir }}/files/probes/{{ inventory_hostname }}/service_links.txt"
+vpnc_net_via: "{{ inventory_hostname != vpnc_net_server and vpnc_net_service_links is file }}"
+vpnc_net_via_port: 51974
+# Fetched through the tunnel itself, so it checks the whole way, UDP included. With
+# several links, 3 failures in a row (15 s apart) move the tunnel to the next link.
+vpnc_net_via_health_url: "http://{{ vpnc_net_server_ip }}:{{ hostvars[vpnc_net_server].prom_port | default(9090) }}/-/healthy"
+# The links as xray-tun-connect reads them: one per line, no blank lines or comments.
+vpnc_net_via_links: "{{ lookup('file', vpnc_net_service_links).splitlines() | map('trim') | reject('match', '^(#|$)') | join('\n') }}\n"
+vpnc_net_via_source: "{{ playbook_dir }}/../xray-tun-connect"
+vpnc_net_via_build_image: golang:1.27.2-trixie
+# Rebuilt when cmd/xray-tun-connect/VERSION changes.
+vpnc_net_via_bin: "{{ playbook_dir }}/files/vpnc-net/bin/xray-tun-connect-{{ lookup('file', vpnc_net_via_source ~ '/cmd/xray-tun-connect/VERSION') }}-{{ vpnc_net_arch }}"
+# Join files and laptop configs from vpnc-net-join.yml.
+vpnc_net_join_dir: "{{ playbook_dir }}/files/vpnc-net/join"

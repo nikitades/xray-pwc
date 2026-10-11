@@ -1,5 +1,5 @@
 ---
-- name: Central monitoring server (Prometheus + Grafana + Caddy)
+- name: Central monitoring server (Prometheus + Grafana + Caddy + the vpnc-net server)
   hosts: monitoring
   become: true
   vars_files:
@@ -11,11 +11,13 @@
       ansible.builtin.assert:
         that:
           - vault_grafana_admin_password is defined
-          - vault_probe_remote_write | default({}) | length > 0
         fail_msg: vault.yml is missing or incomplete, see vault.yml.example
         quiet: true
 
   handlers:
+    - name: Vpnc-net handlers
+      ansible.builtin.import_tasks: handlers/vpnc-net.yml
+
     - name: Restart docker
       ansible.builtin.systemd_service:
         name: docker
@@ -36,6 +38,11 @@
   tasks:
     - name: Docker
       ansible.builtin.import_tasks: tasks/docker.yml
+
+    # Before the stack: it publishes ports on the vpnc-net address. Also writes
+    # the CoreDNS config, so vpnc-net-join.yml can add a member on its own.
+    - name: Vpnc-net tunnel
+      ansible.builtin.import_tasks: tasks/vpnc-net.yml
 
     - name: Create directories
       ansible.builtin.file:

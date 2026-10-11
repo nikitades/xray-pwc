@@ -1,0 +1,175 @@
+---
+# The vpnc-net tunnel: the server on vpnc_net_server, a client everywhere else.
+# The playbook imports handlers/vpnc-net.yml. A reload applies new peers and
+# firewall rules without taking the interface down. On the server it also writes
+# the CoreDNS names.
+
+- name: Check vpnc-net settings
+  ansible.builtin.assert:
+    that:
+      - vpnc_net_ip is defined
+      - vpnc_net_private_key | default('') | length > 0
+      - hostvars[vpnc_net_server].vpnc_net_public_key | default('') | length > 0
+      - vault_vpnc_net_obfuscation is defined
+    fail_msg: >-
+      {{ inventory_hostname }} or {{ vpnc_net_server }} has no host_vars/<name>/vpnc-net.yml
+      (vpnc-net-join.yml -e name=<name>), or vault.yml has no vault_vpnc_net_obfuscation
+    quiet: true
+
+# Another VPN or a LAN on the same addresses would break both.
+- name: Check vpnc-net subnet is free
+  ansible.builtin.script:
+    cmd: files/vpnc_net_check_subnet.py {{ vpnc_net_subnet }} {{ vpnc_net_interface }}
+    executable: python3
+  changed_when: false
+  check_mode: false
+
+- name: Build AmneziaWG
+  ansible.builtin.import_tasks: vpnc-net-build.yml
+
+- name: Create vpnc-net directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: "{{ vpnc_net_bin_dir }}", mode: "0755" }
+    - { path: "{{ vpnc_net_conf_dir }}", mode: "0700" }
+
+- name: Copy AmneziaWG binaries
+  ansible.builtin.copy:
+    src: "{{ vpnc_net_bin_cache }}/{{ item }}"
+    dest: "{{ vpnc_net_bin_dir }}/{{ item }}"
+    mode: "0755"
+  loop: [amneziawg-go, awg, awg-quick]
+  notify: Restart vpnc-net
+
+# With files/probes/<host>/service_links.txt the tunnel goes through one of those
+# links instead of straight to the server: see templates/vpnc-net/vpnc-net-via.service.j2.
+- name: Tunnel through the service links
+  when: vpnc_net_via
+  block:
+    - name: Build xray-tun-connect
+      ansible.builtin.import_tasks: vpnc-net-build-via.yml
+
+    - name: Copy xray-tun-connect
+      ansible.builtin.copy:
+        src: "{{ vpnc_net_via_bin }}"
+        dest: "{{ vpnc_net_bin_dir }}/xray-tun-connect"
+        mode: "0755"
+      notify: Restart vpnc-net-via
+
+    - name: Write service links
+      ansible.builtin.copy:
+        content: "{{ vpnc_net_via_links }}"
+        dest: "{{ vpnc_net_conf_dir }}/service_links.txt"
+        mode: "0600"
+      no_log: true
+      notify: Restart vpnc-net-via
+
+    - name: Template via unit
+      ansible.builtin.template:
+        src: templates/vpnc-net/vpnc-net-via.service.j2
+        dest: /etc/systemd/system/vpnc-net-via.service
+        mode: "0644"
+      notify: Restart vpnc-net-via
+
+    # Started before the tunnel switches its endpoint to it.
+    - name: Ensure vpnc-net-via is running
+      ansible.builtin.systemd_service:
+        name: vpnc-net-via
+        state: started
+        enabled: true
+        daemon_reload: true
+      when: not ansible_check_mode
+
+- name: Remove via files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/systemd/system/vpnc-net-via.service
+    - "{{ vpnc_net_conf_dir }}/service_links.txt"
+    - "{{ vpnc_net_bin_dir }}/xray-tun-connect"
+  when: not vpnc_net_via
+  notify: Stop vpnc-net-via
+
+- name: Template vpnc-net config
+  ansible.builtin.template:
+    src: templates/vpnc-net/{{ 'server' if inventory_hostname == vpnc_net_server else 'client' }}.conf.j2
+    dest: "{{ vpnc_net_conf_dir }}/{{ vpnc_net_interface }}.conf"
+    mode: "0600"
+  no_log: true
+  notify: Reload vpnc-net
+
+- name: Template vpnc-net firewall
+  ansible.builtin.template:
+    src: templates/vpnc-net/firewall.sh.j2
+    dest: "{{ vpnc_net_conf_dir }}/firewall.sh"
+    mode: "0700"
+  notify: Reload vpnc-net
+
+- name: Template vpnc-net unit
+  ansible.builtin.template:
+    src: templates/vpnc-net/vpnc-net.service.j2
+    dest: /etc/systemd/system/vpnc-net.service
+    mode: "0644"
+  notify: Restart vpnc-net
+
+- name: Server settings
+  when: inventory_hostname == vpnc_net_server
+  block:
+    - name: Enable forwarding between peers
+      ansible.builtin.copy:
+        content: "net.ipv4.ip_forward = 1\n"
+        dest: /etc/sysctl.d/90-vpnc-net.conf
+        mode: "0644"
+      register: vpnc_net_sysctl
+
+    - name: Apply forwarding
+      ansible.builtin.command: sysctl -p /etc/sysctl.d/90-vpnc-net.conf
+      when: vpnc_net_sysctl.changed
+
+    - name: Create docker drop-in directory
+      ansible.builtin.file:
+        path: /etc/systemd/system/docker.service.d
+        state: directory
+        mode: "0755"
+
+    # Containers publish ports on the vpnc-net address, so it must exist before they start.
+    - name: Start docker after vpnc-net
+      ansible.builtin.copy:
+        content: |
+          [Unit]
+          Wants=vpnc-net.service
+          After=vpnc-net.service
+        dest: /etc/systemd/system/docker.service.d/vpnc-net.conf
+        mode: "0644"
+
+    - name: Create coredns directory
+      ansible.builtin.file:
+        path: "{{ monitoring_dir }}/coredns"
+        state: directory
+        mode: "0755"
+
+    # CoreDNS rereads both files itself, no restart needed.
+    - name: Template coredns config
+      ansible.builtin.template:
+        src: templates/monitoring/{{ item.src }}
+        dest: "{{ monitoring_dir }}/coredns/{{ item.dest }}"
+        mode: "0644"
+      loop:
+        - { src: Corefile.j2, dest: Corefile }
+        - { src: vpnc-net.hosts.j2, dest: vpnc-net.hosts }
+
+- name: Ensure vpnc-net is running
+  ansible.builtin.systemd_service:
+    name: vpnc-net
+    state: started
+    enabled: true
+    daemon_reload: true
+  when: not ansible_check_mode
+
+# The monitoring stack binds to the vpnc-net address, and the probes reach Prometheus through it.
+- name: Flush handlers
+  ansible.builtin.meta: flush_handlers

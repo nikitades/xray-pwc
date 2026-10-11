@@ -1,213 +1,76 @@
 # VpnChecker
 
-Monitoring for Xray VPN links, measured from the networks your users are in.
+VpnChecker shows whether your VPN links really work for people in a given
+network, for example a home internet provider in one city. You put a small
+Linux machine, a *probe*, into that network. Every few minutes the probe
+opens real websites through each of your links, the way a person would, and
+records how far it got: everything opened, some sites opened, or nothing got
+through.
 
-You put small machines (probes) inside the networks you care about, for
-example a home ISP in a given city. Every few minutes each probe opens a set
-of web pages through every VPN link, in a headless Chromium, and reports
-whether they loaded. Grafana Alloy on each probe pushes the results to a
-central Prometheus with remote write, and you read them in Grafana.
+All probes send their results to one central server, which stores them and
+draws them in Grafana. Probes need no public address and no open ports: each
+one connects to the server by itself through a small private network,
+vpnc-net. The same network lets you reach the probes over SSH from your
+laptop. Where the provider blocks that connection, a probe can carry it
+through one of your VPN links instead.
 
-The project is young (`0.1.0`) and has been run against a small number of
-probes. Treat the defaults as a starting point, not as tuned values.
+Everything is installed with Ansible from your own machine. The probe
+software is built there too and copied to the probes, so no registry or
+public repository is needed. The project is young (`0.1.0`) and runs on a
+handful of probes: treat the defaults as a starting point, not as tuned
+values.
 
-## What it measures
+## What runs on the central server
 
-A check of one link, on one probe, is:
+A Docker Compose project, `vpn-monitoring` in `/opt/vpn-monitoring`:
 
-1. Start a local SOCKS5 tunnel for the link (this is a simplified version of a
-   real Xray tunnel).
-2. Open `N` heavy pages, each picked at random from a list (default: 3 pages
-   from Wikipedia's random article, The Sun, site123). A heavy page counts as
-   opened when the document reaches `DOMContentLoaded`.
-3. Open every target page from a second list, in order (default: Instagram,
-   Facebook). A target page counts as opened when the main document answers
-   HTTP `200`.
-4. Close the tunnel and the browser. The next check starts from scratch.
-
-Each page gets up to 3 attempts with a 30 s navigation timeout and a backoff
-of 2 s, then 4 s. Both lists are plain URLs in the settings.
-
-The result is the furthest point the check reached, from full failure to
-full success:
-
-| `pwc_tunnel_stage` | result | meaning |
+| service | what it does | listens on |
 |---|---|---|
-| `0` | `failed` | the tunnel could not start from this link |
-| `1` | `failed` | nothing proves that traffic got through |
-| `2` | `partial` | traffic got through the tunnel, but not every page opened |
-| `3` | `OK` | every page opened |
+| `prometheus` | stores the results: probes push them (remote write), kept 180 days or 40 GB. It has no password, so it is not public | `127.0.0.1:9090` and `10.213.97.1:9090` (vpnc-net) |
+| `grafana` | graphs, dashboards, alerts | `127.0.0.1:3000`, public through Caddy |
+| `coredns` | names inside vpnc-net: `<host>.vpnc-net.internal` and `prom.vpnc-net.internal`; any other name goes to 1.1.1.1 and 8.8.8.8 | `10.213.97.1:53` |
 
-Traffic "got through" when a page opened, or a site answered with any HTTP
-status, or a TLS handshake with a site failed. A refused SOCKS connection
-proves nothing got through. A timeout or a reset proves nothing either way: it
-can be a dead server or a connection that stalls after the first bytes. So a
-link where every page only timed out counts as `failed`.
+On the host itself, outside Compose:
 
-The metric is also labelled with the probe name, the link name and a hash of
-the link that does not change when the link is renamed.
+- **Caddy** (a system package): HTTPS for Grafana with a Let's Encrypt
+  certificate. It is the only public web service.
+- **`vpnc-net.service`**: the vpnc-net server (AmneziaWG, UDP `51973`). Docker
+  starts after it, because Prometheus and CoreDNS listen on its address.
 
-### Why heavy pages
+## What runs on a probe
 
-A check that fetches a tiny page, such as `generate_204`, sends a few hundred
-bytes. Some DPI setups, notably in Russia, let a TCP connection to certain
-foreign networks start normally and then stall it after roughly 16 KB. A tiny
-request passes; a real page does not. We hit exactly this on the probes' own
-metrics traffic. Heavy pages push enough bytes through the tunnel to cross
-that threshold.
+A Docker Compose project, `xray-tun-pwc` in `/opt/xray-tun-pwc`:
 
-## What it does not measure
-
-The check answers one question: did the pages load through the tunnel. It
-does not measure speed, so slow throttling that still fits in 30 s looks
-fine. It does not check images, scripts or CDNs: a target page passes on its
-main HTML, and a heavy page passes even with a 403. Headless Chromium is not
-a real user, and sites may answer it with a captcha or `429`, which is rate
-limiting, not censorship. Problems shorter than the check interval can be
-missed. Comparing probes hints at who is broken (the ISP, the VPN server or
-the probe), but it is a guess, and it needs more than one probe.
-
-## What it costs
-
-- **Traffic.** Every check of every link downloads the HTML of `N` heavy pages
-  and all target pages, plus whatever the browser fetches before
-  `DOMContentLoaded`. On a metered or home connection, choose the number of
-  links, `N` and the interval with that in mind.
-- **Image size.** The probe image contains Chromium, so it is large. It is
-  built once on your machine and sent to probes only when the code changes.
-- **CPU and memory.** One Chromium at a time per probe. Links are checked one
-  after another, not in parallel.
-
-## Components
-
-| folder | language | role |
-|---|---|---|
-| [`xray-tun-connect/`](xray-tun-connect/) | Go | turns share links into local SOCKS5 tunnels, one port per link; a bad link keeps its port and is reported, the others still start |
-| [`xray-tun-pwc/`](xray-tun-pwc/) | Python | **PWC = Pressurising Web Checker.** Runs the checks through the tunnels and exports the metrics |
-| [`ansible/`](ansible/) | Ansible | deploys probes and a central Prometheus + Grafana behind Caddy |
-
-```
-probe:  xray-tun-pwc -> Chromium -> SOCKS5 -> xray-tun-connect -> VPN server -> websites
-          |
-          +- /metrics -> Grafana Alloy -> relay -> remote_write -> central Prometheus -> Grafana
-```
-
-Probes push metrics; the central server never connects to them, so probes can
-sit behind NAT. Deploying with Ansible still needs SSH access to each probe.
-The relay on each probe opens a new connection for every
-write, to get around the same ~16 KB stall described above.
-
-## Quickstart
-
-Check one link from your machine. You need [uv](https://docs.astral.sh/uv/),
-Python 3.14 and the `xray-tun-connect` binary. Get the binary in one of two
-ways.
-
-**A. Build it.** Needs Go 1.27+:
-
-```bash
-make -C xray-tun-connect install          # installs xray-tun-connect into ~/go/bin
-```
-
-**B. Download it.** Take `xray-tun-connect-<os>-<arch>` from the Releases page
-(for example `xray-tun-connect-linux-amd64`), then either put it on `PATH`
-under the name `xray-tun-connect`:
-
-```bash
-install -m 755 xray-tun-connect-linux-amd64 ~/.local/bin/xray-tun-connect
-```
-
-or point the checker at it directly:
-
-```bash
-chmod +x xray-tun-connect-linux-amd64
-export PWC_XRAY_TUN_CONNECT_BIN="$PWD/xray-tun-connect-linux-amd64"
-```
-
-On macOS, a file downloaded with a browser is quarantined. Clear it with
-`xattr -d com.apple.quarantine <file>`.
-
-Then run the checker:
-
-```bash
-cd xray-tun-pwc
-uv sync
-uv run playwright install chromium
-
-echo 'vless://...your link...#my-server' > links.txt
-PWC_CONFIG_PATH=links.txt uv run xray-tun-pwc
-```
-
-```
-xray-tun-pwc 0.1.0 | instance my-laptop | 1 tunnels | every PT5M + up to PT2M
-my-server - OK
-```
-
-A check from your own machine only tells you that the link works from your
-network. The point of the project is to run it from the networks you care
-about: **to monitor a fleet of probes, follow the step-by-step guide in
-[`ansible/README.md`](ansible/README.md).**
-
-Settings and the Docker image are described in
-[`xray-tun-pwc/README.md`](xray-tun-pwc/README.md).
-
-## Metrics
-
-Each probe exposes one series per link on `http://<probe>:8000/metrics`. Its
-value is the stage the last check reached:
-
-```
-pwc_tunnel_stage{instance="spb-home-1",tunnel="msk-reality",stable_id="3f9c0d2a71e4b6c8"} 3
-pwc_tunnel_stage{instance="spb-home-1",tunnel="ams-ws",stable_id="8a01c7d3e9f25b14"} 2
-pwc_tunnel_stage{instance="spb-home-1",tunnel="old-trojan",stable_id="c42e6f0b18a9d357"} 1
-pwc_tunnel_stage{instance="spb-home-1",tunnel="typo",stable_id="5d7a90c3be41f826"} 0
-```
-
-Here `msk-reality` opened every page, traffic got through `ams-ws` but not
-every page opened, nothing got through `old-trojan`, and `typo` is not a
-valid link.
-
-| label | meaning |
+| service | what it does |
 |---|---|
-| `instance` | the probe (`PWC_INSTANCE`) |
-| `tunnel` | the link name, the text after `#` |
-| `stable_id` | hash of the link without its name; survives renames |
+| `xray-tun-pwc` | the checker. It opens the sites through each link with Chromium and xray-tun-connect, and uses the probe's own network and DNS, so it sees what a local user sees |
+| `alloy` | Grafana Alloy: every 30 s it collects the checker's results and the host's CPU, memory, disk and network, and sends them on. If the server is out of reach, it keeps up to 8 hours of data and sends it later |
+| `relay` | a small Caddy that takes Alloy's data and sends it to Prometheus through vpnc-net. It opens a new connection for every batch, because some providers freeze a long connection to foreign hosting after about 16 KB |
 
-Next to it, `pwc_tunnel_error{error_type="..."}` tells why a check fell
-short: one series per link and error type (`ERR_CONNECTION_RESET`,
-`timeout`, `HTTP 429`, `link_broken`, ...), `1` if the last check met it,
-`0` if only an earlier one did.
+On the host itself, outside Compose:
 
-Each link keeps one continuous series, whatever the stage. In Grafana, a
-State timeline panel with value mappings (`0` and `1` red, `2` yellow, `3`
-green) shows the whole history at a glance. Useful queries:
+- **`vpnc-net.service`**: the vpnc-net client. Only `10.213.97.0/24` goes
+  into it: no default route, no DNS changes, so other VPNs on the machine
+  keep working.
+- **`vpnc-net-via.service`**, only on probes with a `service_links.txt`:
+  carries vpnc-net through one of those VPN links, for providers that block
+  UDP to the server. If the server stops answering through it, the next link
+  takes over, and after the last one a direct try without a VPN.
 
-```promql
-# links that work on this probe, fully or partly
-pwc_tunnel_stage >= 2
-
-# links that work but lose some sites
-pwc_tunnel_stage == 2
-
-# links that fail on every probe: likely the VPN server
-max by (tunnel) (pwc_tunnel_stage) < 2
-
-# probes where every link fails: likely the probe or its ISP
-max by (instance) (pwc_tunnel_stage) < 2
-
-# why links fail right now, per probe
-pwc_tunnel_error == 1
-
-# share of checks in the last day where the link worked
-avg_over_time((pwc_tunnel_stage >= bool 2)[1d:5m])
+```
+probe:  xray-tun-pwc -> VPN link -> websites
+        alloy -> relay -> vpnc-net (-> service link) -> server: prometheus -> grafana
 ```
 
-## Secrets
+## Where to read more
 
-Share links contain credentials. On the probe they are a plain-text file
-readable by root and by the checker's user. They are passed to
-`xray-tun-connect` over stdin, so they do not show up in the process list.
-
-Inventory, passwords and links (`ansible/inventory.yml`, `ansible/vault.yml`,
-`ansible/files/probes/`) are git-ignored. `vault.yml` is plain text, not
-encrypted with ansible-vault: protect your machine accordingly.
+- [`xray-tun-pwc/`](xray-tun-pwc/README.md), the checker: what one check
+  does, how the result is counted, what it does not catch, the metrics and
+  useful queries, the settings. Start here to try one link on your own
+  machine.
+- [`xray-tun-connect/`](xray-tun-connect/README.md), a small Go tool the
+  checker uses: it turns share links into local ports, and forwards the
+  vpnc-net tunnel on probes with service links.
+- [`ansible/`](ansible/README.md), the deployment: the central server and
+  the probes step by step, adding and removing probes, how vpnc-net works,
+  where the secrets live.

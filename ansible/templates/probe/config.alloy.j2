@@ -54,11 +54,6 @@ prometheus.remote_write "central" {
     metadata_config {
       send = false
     }
-
-    basic_auth {
-      username = "{{ inventory_hostname }}"
-      password = sys.env("PROM_PASSWORD")
-    }
   }
 
   // The network may be gone for a long time: keep the WAL and send it later.

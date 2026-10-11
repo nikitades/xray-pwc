@@ -1,0 +1,53 @@
+---
+# Removes a member from vpnc-net: forgets its address and keys here and tells
+# the server. For a probe, clean it first, while Ansible still reaches it:
+#   ansible-playbook probes-clean.yml --limit <name> -e vpnc_net_remove=true
+#   ansible-playbook vpnc-net-remove.yml -e name=<name>
+- name: Forget the vpnc-net member
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  tasks:
+    - name: Check parameters
+      ansible.builtin.assert:
+        that:
+          - name | default('') | length > 0
+          - name != vpnc_net_server
+        fail_msg: -e name=<name>; the vpnc-net server cannot be removed
+        quiet: true
+
+    - name: Find inventory.d entry
+      ansible.builtin.stat:
+        path: "{{ playbook_dir }}/inventory.d/{{ name }}.yml"
+      register: remove_entry
+
+    - name: Remove member files
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop: "{{ [playbook_dir ~ '/host_vars/' ~ name,
+                 playbook_dir ~ '/inventory.d/' ~ name ~ '.yml']
+                + query('fileglob', vpnc_net_join_dir ~ '/' ~ name ~ '[.-]*') }}"
+
+    - name: Reload inventory
+      ansible.builtin.meta: refresh_inventory
+
+    - name: Report inventory.yml entry
+      ansible.builtin.debug:
+        msg: "{{ name }} is still in inventory.yml: remove it there by hand."
+      when: name in groups['all'] and not remove_entry.stat.exists
+
+- name: Tell the vpnc-net server
+  hosts: monitoring
+  become: true
+  vars_files:
+    - vault.yml
+
+  handlers:
+    - name: Vpnc-net handlers
+      ansible.builtin.import_tasks: handlers/vpnc-net.yml
+
+  tasks:
+    - name: Vpnc-net tunnel
+      ansible.builtin.import_tasks: tasks/vpnc-net.yml

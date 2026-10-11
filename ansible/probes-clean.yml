@@ -1,5 +1,6 @@
 ---
 # Removes the xray-tun-pwc stack from the probes, with its data and images.
+# -e vpnc_net_remove=true also removes the vpnc-net tunnel.
 - name: Clean the probes
   hosts: probes
   become: true
@@ -30,3 +31,15 @@
         | xargs -r docker image rm
       register: removed_images
       changed_when: removed_images.stdout | length > 0
+
+    # Only with -e vpnc_net_remove=true (see vpnc-net-remove.yml): Ansible may be talking
+    # to the probe through this very tunnel. A transient unit does the work, so it
+    # finishes after the connection drops.
+    - name: Remove vpnc-net
+      ansible.builtin.command: >-
+        systemd-run --collect --unit=vpnc-net-remove /bin/sh -c
+        'sleep 2; systemctl disable --now vpnc-net vpnc-net-via;
+        rm -rf /etc/systemd/system/vpnc-net.service /etc/systemd/system/vpnc-net-via.service
+        {{ vpnc_net_conf_dir }} {{ vpnc_net_bin_dir | dirname }};
+        systemctl daemon-reload'
+      when: vpnc_net_remove | default(false) | bool

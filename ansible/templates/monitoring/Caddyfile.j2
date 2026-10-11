@@ -9,18 +9,4 @@
 	reverse_proxy 127.0.0.1:{{ grafana_port }}
 }
 
-# Only remote write is exposed, behind basic auth. Everything else is 404.
-{{ caddy_prometheus_domain }} {
-	@write path /api/v1/write
-	handle @write {
-		basicauth {
-{% for user, creds in vault_probe_remote_write | dictsort %}
-			{{ user }} {{ creds.bcrypt }}
-{% endfor %}
-		}
-		reverse_proxy 127.0.0.1:{{ prom_port }}
-	}
-	handle {
-		respond 404
-	}
-}
+# Prometheus is not here: the probes reach it through the vpnc-net tunnel.

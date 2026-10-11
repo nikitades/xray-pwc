@@ -1,0 +1,71 @@
+---
+# Moves Ansible's SSH to the probe onto vpnc-net. Runs while the old address still
+# works: puts vpnc_net_ssh_key on the probe, tries SSH to the vpnc-net address from this
+# machine, and only if that works writes host_vars/<probe>/ssh.yml. From the next
+# run on, Ansible connects through the tunnel. -e vpnc_net_ssh=false goes back to the
+# old address. Probes added with vpnc-net-join.yml are on vpnc-net from the start.
+
+- name: Move SSH to vpnc-net
+  when: ansible_host != vpnc_net_ip and not ansible_check_mode
+  block:
+    # The real user and port behind an alias from ~/.ssh/config.
+    - name: Read current SSH settings
+      ansible.builtin.command: ssh -G {{ ansible_host }}
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      register: vpnc_net_ssh_config
+
+    - name: Pick SSH user and port
+      ansible.builtin.set_fact:
+        vpnc_net_ssh_user: "{{ ansible_user | default(vpnc_net_ssh_config.stdout | regex_search('(?m)^user (.+)$', '\\1') | first) }}"
+        vpnc_net_ssh_port: "{{ ansible_port | default(vpnc_net_ssh_config.stdout | regex_search('(?m)^port (.+)$', '\\1') | first) }}"
+
+    - name: Find SSH user home
+      ansible.builtin.getent:
+        database: passwd
+        key: "{{ vpnc_net_ssh_user }}"
+
+    - name: Create .ssh directory
+      ansible.builtin.file:
+        path: "{{ ansible_facts.getent_passwd[vpnc_net_ssh_user][4] }}/.ssh"
+        state: directory
+        owner: "{{ vpnc_net_ssh_user }}"
+        mode: "0700"
+
+    # Some hosts let you in another way (Tailscale SSH), so the key may be missing.
+    - name: Add vpnc-net SSH key
+      ansible.builtin.lineinfile:
+        path: "{{ ansible_facts.getent_passwd[vpnc_net_ssh_user][4] }}/.ssh/authorized_keys"
+        line: "{{ lookup('file', vpnc_net_ssh_public_key | expanduser) }}"
+        create: true
+        owner: "{{ vpnc_net_ssh_user }}"
+        mode: "0600"
+
+    # Needs this machine in vpnc-net too, as a vpnc_net_peers member.
+    - name: Try SSH through vpnc-net
+      ansible.builtin.command: >-
+        ssh {{ vpnc_net_ssh_args }} -o BatchMode=yes -o ConnectTimeout=10
+        -i {{ vpnc_net_ssh_private_key | expanduser }} -p {{ vpnc_net_ssh_port }}
+        {{ vpnc_net_ssh_user }}@{{ vpnc_net_ip }} true
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      failed_when: false
+      register: vpnc_net_ssh_try
+
+    - name: Switch Ansible to vpnc-net
+      ansible.builtin.template:
+        src: templates/vpnc-net/ssh.yml.j2
+        dest: "{{ playbook_dir }}/host_vars/{{ inventory_hostname }}/ssh.yml"
+        mode: "0644"
+      delegate_to: localhost
+      become: false
+      when: vpnc_net_ssh_try.rc == 0
+
+    - name: Report SSH through vpnc-net failed
+      ansible.builtin.debug:
+        msg: >-
+          SSH to {{ vpnc_net_ssh_user }}@{{ vpnc_net_ip }} failed ({{ vpnc_net_ssh_try.stderr | trim }}),
+          Ansible stays on {{ ansible_host }}. Is the vpnc-net tunnel up on this machine?
+      when: vpnc_net_ssh_try.rc != 0

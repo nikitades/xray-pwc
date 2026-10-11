@@ -1,11 +1,14 @@
 ---
 # Copy to inventory.yml (git-ignored) and fill in your hosts and domains.
+# Machines added with vpnc-net-join.yml go to inventory.d/ instead, and every vpnc-net
+# member gets host_vars/<name>/vpnc-net.yml with its address and keys.
 all:
   vars:
     ansible_python_interpreter: /usr/bin/python3
     caddy_grafana_domain: grafana.example.com
-    caddy_prometheus_domain: prometheus.example.com
     caddy_https_port: 443
+    # The SSH key Ansible uses through vpnc-net; it is put on every probe.
+    vpnc_net_ssh_key: ~/.ssh/id_ed25519.pub
   children:
     monitoring:
       hosts:
@@ -13,6 +16,8 @@ all:
           ansible_host: monitor.example.com
           ansible_user: root
 
+    # Probes with a public address, reachable before vpnc-net. probes.yml moves
+    # Ansible's SSH to vpnc-net for them. Probes without one: vpnc-net-join.yml.
     probes:
       hosts:
         probe-1:

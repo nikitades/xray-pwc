@@ -1,0 +1,15 @@
+---
+# Written by vpnc-net-join.yml.
+all:
+  children:
+    {{ join_group }}:
+      hosts:
+        {{ name }}:
+{% if join_group == 'vpnc_net_peers' %}
+          ansible_connection: local
+{% else %}
+          ansible_host: "{{ '{{' }} vpnc_net_ip {{ '}}' }}"
+          ansible_user: {{ ssh_user }}
+          ansible_ssh_private_key_file: "{{ '{{' }} vpnc_net_ssh_private_key {{ '}}' }}"
+          ansible_ssh_common_args: "{{ '{{' }} vpnc_net_ssh_args {{ '}}' }}"
+{% endif %}

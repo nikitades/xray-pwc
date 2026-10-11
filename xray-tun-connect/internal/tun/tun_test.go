@@ -2,7 +2,11 @@ package tun
 
 import (
 	"context"
+	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"testing"
 	"time"
@@ -66,4 +70,27 @@ func freePortBase(t *testing.T) int {
 	}
 	defer l.Close()
 	return l.Addr().(*net.TCPAddr).Port + 100
+}
+
+// The SOCKS port really carries a request, here without a VPN.
+func TestSocksCarriesARequest(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("hello")) }))
+	defer srv.Close()
+	res, err := Start(context.Background(), Options{Links: []string{DirectLink}, StartPort: freePortBase(t), ReadyTimeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer res.Close()
+
+	proxy := &url.URL{Scheme: "socks5", Host: net.JoinHostPort("127.0.0.1", strconv.Itoa(res.Tunnels[0].Port))}
+	client := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{Proxy: http.ProxyURL(proxy)}}
+	resp, err := client.Get(srv.URL)
+	if err != nil {
+		t.Fatalf("GET through SOCKS: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if string(body) != "hello" {
+		t.Errorf("body = %q", body)
+	}
 }

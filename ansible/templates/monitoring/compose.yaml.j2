@@ -12,8 +12,10 @@ services:
       - --storage.tsdb.retention.time={{ prom_retention_time }}
       - --storage.tsdb.retention.size={{ prom_retention_size }}
       - --web.enable-remote-write-receiver
+    # No auth: only the loopback and the vpnc-net tunnel reach it.
     ports:
       - "127.0.0.1:{{ prom_port }}:9090"
+      - "{{ vpnc_net_ip }}:{{ prom_port }}:9090"
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
@@ -27,6 +29,20 @@ services:
       - "127.0.0.1:{{ grafana_port }}:3000"
     volumes:
       - grafana_data:/var/lib/grafana
+
+  # Names in {{ vpnc_net_domain }} for the vpnc-net peers; everything else is forwarded.
+  coredns:
+    image: {{ coredns_image }}
+    container_name: vpn-coredns
+    restart: unless-stopped
+    command: ["-conf", "/etc/coredns/Corefile"]
+    ports:
+      - "{{ vpnc_net_ip }}:53:53/udp"
+      - "{{ vpnc_net_ip }}:53:53/tcp"
+    # A directory, not files: CoreDNS rereads them, and a mounted file would
+    # keep the old version after the template replaces it.
+    volumes:
+      - ./coredns:/etc/coredns:ro
 
 volumes:
   prometheus_data:

@@ -1,0 +1,30 @@
+#!/bin/bash
+# vpnc-net join file for {{ inventory_hostname }} ({{ vpnc_net_ip }}, Linux {{ vpnc_net_join_machine }}).
+# Run it on that machine: bash {{ vpnc_net_join_file | basename }}
+# It asks for the passphrase that came with it (or reads VPNC_NET_JOIN_PASS) and
+# installs the vpnc-net tunnel. Made by vpnc-net-join.yml from the VpnChecker repository.
+set -euo pipefail
+
+if [[ $EUID != 0 ]]; then
+	exec sudo ${VPNC_NET_JOIN_PASS:+VPNC_NET_JOIN_PASS="$VPNC_NET_JOIN_PASS"} bash "$0" "$@"
+fi
+command -v openssl >/dev/null || { echo "vpnc-net: openssl is missing, install it first" >&2; exit 1; }
+
+pass=${VPNC_NET_JOIN_PASS:-}
+if [[ -z $pass ]]; then
+	read -rsp "Passphrase: " pass </dev/tty
+	echo
+fi
+
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+start=$(awk '/^__PAYLOAD_BELOW__$/ { print NR + 1; exit }' "$0")
+if ! tail -n +"$start" "$0" \
+	| VPNC_NET_JOIN_PASS=$pass openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:VPNC_NET_JOIN_PASS 2>/dev/null \
+	| tar -xz -C "$work" 2>/dev/null; then
+	echo "vpnc-net: wrong passphrase or damaged file" >&2
+	exit 1
+fi
+bash "$work/install.sh"
+exit $?
+__PAYLOAD_BELOW__

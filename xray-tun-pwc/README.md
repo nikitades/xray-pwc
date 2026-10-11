@@ -55,6 +55,39 @@ What proves that traffic got through the tunnel:
 So a link where every page only timed out is `failed`, and a link where
 every site answered `429` is `partial`.
 
+### Why heavy pages
+
+A check that fetches a tiny page, such as `generate_204`, sends a few hundred
+bytes. Some DPI setups, notably in Russia, let a TCP connection to certain
+foreign networks start normally and then stall it after roughly 16 KB. A tiny
+request passes; a real page does not. We hit exactly this on the probes' own
+metrics traffic. Heavy pages push enough bytes through the tunnel to cross
+that threshold.
+
+## What it does not catch
+
+A check answers one question: did the pages load through the tunnel.
+
+- **Speed.** Slow throttling that still fits in the 30 s timeout looks fine.
+- **Everything but the main page.** Images, scripts and CDNs are not checked:
+  a target site passes on its HTML, a heavy site even with a `403`.
+- **Bots versus people.** Headless Chromium is not a real user. Sites may
+  answer it with a captcha or `429`, which is rate limiting, not censorship.
+- **Short outages.** Problems shorter than the check interval can be missed.
+- **Who is to blame.** Comparing probes hints at it (the provider, the VPN
+  server or the probe), but it is a guess, and it needs more than one probe.
+
+## What it costs
+
+- **Traffic.** Every check of every link downloads the HTML of
+  `PWC_HEAVY_VISITS` heavy pages and all target pages, plus whatever the
+  browser fetches before `DOMContentLoaded`. On a metered connection, choose
+  the number of links, the visits and the interval with that in mind.
+- **Image size.** The image contains Chromium, so it is large. Ansible builds
+  it once on your machine and sends it to probes only when the code changes.
+- **CPU and memory.** One Chromium at a time. Links are checked one after
+  another, not in parallel.
+
 ## Output
 
 On start it prints one line about itself, then one line per link after every
@@ -107,10 +140,27 @@ pwc_tunnel_error{instance="probe-1",tunnel="spb-ws",stable_id="8a01...",error_ty
 - The value is `1` if the last check met this error, `0` if only an earlier
   check did. A link that never failed has no series.
 
+In Grafana, a State timeline panel with value mappings (`0` and `1` red, `2`
+yellow, `3` green) shows the whole history at a glance. Useful queries:
+
 ```promql
-pwc_tunnel_stage >= 2                          # the link works, fully or partly
-count by (tunnel) (pwc_tunnel_stage == 2)      # probes where a link is only partial
-pwc_tunnel_error == 1                          # what is failing right now, and where
+# links that work, fully or partly
+pwc_tunnel_stage >= 2
+
+# probes where a link is only partial
+count by (tunnel) (pwc_tunnel_stage == 2)
+
+# links that fail on every probe: likely the VPN server
+max by (tunnel) (pwc_tunnel_stage) < 2
+
+# probes where every link fails: likely the probe or its provider
+max by (instance) (pwc_tunnel_stage) < 2
+
+# what is failing right now, and where
+pwc_tunnel_error == 1
+
+# share of checks in the last day where the link worked
+avg_over_time((pwc_tunnel_stage >= bool 2)[1d:5m])
 ```
 
 ## Settings
@@ -129,6 +179,10 @@ All settings are environment variables, and all are optional.
 | `PWC_HTTP_PORT` | `8000` | port for `/metrics` |
 | `PWC_XRAY_TUN_CONNECT_BIN` | auto | path to `xray-tun-connect` |
 
+Share links contain credentials: keep the links file readable only by the
+checker. It passes them to `xray-tun-connect` over stdin, so they do not
+show up in the process list.
+
 Sites are full URLs, not just domains, so you can check one exact page:
 
 ```bash
@@ -144,14 +198,27 @@ When it is missing, the error also says how to install it.
 
 ### Locally
 
+You need [uv](https://docs.astral.sh/uv/), Python 3.14 and the
+`xray-tun-connect` binary. Build it (Go 1.27+):
+
 ```bash
-make -C ../xray-tun-connect install
+make -C ../xray-tun-connect install       # into ~/go/bin
+```
+
+or take `xray-tun-connect-<os>-<arch>` from the Releases page and point the
+checker at it with `PWC_XRAY_TUN_CONNECT_BIN=<path>`. On macOS, clear the
+quarantine of a downloaded file first: `xattr -d com.apple.quarantine <file>`.
+Then:
+
+```bash
 uv sync
 uv run playwright install chromium
+echo 'vless://...your link...#my-server' > links.txt
 PWC_CONFIG_PATH=links.txt uv run xray-tun-pwc
 ```
 
-Stop it with Ctrl+C or `SIGTERM`. It finishes cleanly and closes the tunnels.
+A check from your machine only tells you that the link works from your
+network. Stop it with Ctrl+C or `SIGTERM`. It finishes cleanly and closes the tunnels.
 
 ### In Docker
 
@@ -169,7 +236,7 @@ docker run --rm --shm-size 512m \
 `--shm-size` gives Chromium more shared memory. Docker's default is 64 MB,
 and Chromium can run out of it on big pages.
 
-On real probes, use the Ansible playbook `probes-pwc.yml`. See
+On real probes, use the Ansible playbook `probes.yml`. See
 [`../ansible/README.md`](../ansible/README.md).
 
 ## Development

@@ -25,9 +25,7 @@ services:
     image: {{ relay_image }}
     container_name: xray-tun-pwc-relay
     restart: unless-stopped
-{% if probe_dns %}
-    dns: {{ probe_dns | to_json }}
-{% endif %}
+    dns: ["{{ vpnc_net_server_ip }}"]
     volumes:
       - {{ probe_dir }}/Caddyfile:/etc/caddy/Caddyfile:ro
 
@@ -43,7 +41,6 @@ services:
       - /etc/alloy/config.alloy
       - --storage.path=/var/lib/alloy/data
       - --disable-reporting
-    env_file: {{ probe_dir }}/alloy.env
     volumes:
       - {{ probe_dir }}/config.alloy:/etc/alloy/config.alloy:ro
       - alloy_data:/var/lib/alloy/data

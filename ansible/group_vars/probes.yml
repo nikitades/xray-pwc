@@ -12,13 +12,15 @@ pwc_check_interval: PT5M
 pwc_check_jitter: PT2M
 
 # files/probes/<hostname>/*: share links, one per line; all files are joined into one links.txt.
-probe_link_files: "{{ query('fileglob', 'probes/' ~ inventory_hostname ~ '/*') | sort }}"
+# service_links.txt is not one of them: it is for the probe's own traffic (vpnc_net_service_links).
+probe_link_files: "{{ query('fileglob', 'probes/' ~ inventory_hostname ~ '/*') | reject('search', '/service_links\\.txt$') | sort }}"
 
 # DNS servers for the probe containers, when the host resolver is broken. Empty: Docker's default.
 probe_dns: []
 
 # Some networks freeze a TCP connection to foreign hosting after ~16 KB, so Alloy
 # sends through a local relay: a new connection for every request, small batches.
-prom_remote_write_upstream: "https://{{ caddy_prometheus_domain }}:{{ caddy_https_port }}"
+# The relay reaches Prometheus through the vpnc-net tunnel and resolves the name with
+# the vpnc-net DNS server.
+prom_remote_write_upstream: "http://prom.{{ vpnc_net_domain }}:{{ hostvars[vpnc_net_server].prom_port | default(9090) }}"
 prom_remote_write_max_samples: 200
-prom_remote_write_password: "{{ vault_probe_remote_write[inventory_hostname].password }}"
