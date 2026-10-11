@@ -45,7 +45,7 @@ A Docker Compose project, `xray-tun-pwc` in `/opt/xray-tun-pwc`:
 |---|---|
 | `xray-tun-pwc` | the checker. It opens the sites through each link with Chromium and xray-tun-connect, and uses the probe's own network and DNS, so it sees what a local user sees |
 | `alloy` | Grafana Alloy: every 30 s it collects the checker's results and the host's CPU, memory, disk and network, and sends them on. If the server is out of reach, it keeps up to 8 hours of data and sends it later |
-| `relay` | a small Caddy that takes Alloy's data and sends it to Prometheus through vpnc-net. It opens a new connection for every batch, because some providers freeze a long connection to foreign hosting after about 16 KB |
+| `relay` | optional (`probe_relay`, on by default): a small Caddy that takes Alloy's data and sends it to Prometheus through vpnc-net. It opens a new connection for every batch, because some providers freeze a long connection to foreign hosting after about 16 KB. Without it, Alloy sends straight to Prometheus |
 
 On the host itself, outside Compose:
 

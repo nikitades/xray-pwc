@@ -45,7 +45,7 @@ prometheus.remote_write "central" {
   }
 
   endpoint {
-    url = "http://relay:8080/api/v1/write"
+    url = "{{ 'http://relay:8080' if probe_relay else prom_remote_write_upstream }}/api/v1/write"
 
     queue_config {
       max_samples_per_send = {{ prom_remote_write_max_samples }}

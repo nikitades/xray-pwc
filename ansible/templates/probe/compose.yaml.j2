@@ -21,6 +21,7 @@ services:
     # Chromium may run out of the default 64 MB /dev/shm on heavy pages.
     shm_size: 512m
 
+{% if probe_relay %}
   relay:
     image: {{ relay_image }}
     container_name: xray-tun-pwc-relay
@@ -29,11 +30,15 @@ services:
     volumes:
       - {{ probe_dir }}/Caddyfile:/etc/caddy/Caddyfile:ro
 
+{% endif %}
   alloy:
     image: {{ alloy_image }}
     container_name: xray-tun-pwc-alloy
     restart: unless-stopped
-{% if probe_dns %}
+{% if not probe_relay %}
+    # Sends to prom.{{ vpnc_net_domain }} itself: the vpnc-net DNS server knows it.
+    dns: ["{{ vpnc_net_server_ip }}"]
+{% elif probe_dns %}
     dns: {{ probe_dns | to_json }}
 {% endif %}
     command:

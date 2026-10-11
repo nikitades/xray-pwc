@@ -110,6 +110,13 @@
             path: "{{ pwc_image_archive }}"
             state: absent
 
+        - name: Remove image archive locally
+          ansible.builtin.file:
+            path: "{{ pwc_image_archive }}"
+            state: absent
+          delegate_to: localhost
+          become: false
+
     - name: Create probe directory
       ansible.builtin.file:
         path: "{{ probe_dir }}"
@@ -140,6 +147,13 @@
         dest: "{{ probe_dir }}/Caddyfile"
         mode: "0644"
       notify: Restart probe stack
+      when: probe_relay
+
+    - name: Remove relay config
+      ansible.builtin.file:
+        path: "{{ probe_dir }}/Caddyfile"
+        state: absent
+      when: not probe_relay
 
     - name: Template compose file
       ansible.builtin.template:

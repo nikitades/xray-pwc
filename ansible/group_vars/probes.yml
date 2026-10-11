@@ -18,9 +18,13 @@ probe_link_files: "{{ query('fileglob', 'probes/' ~ inventory_hostname ~ '/*') |
 # DNS servers for the probe containers, when the host resolver is broken. Empty: Docker's default.
 probe_dns: []
 
-# Some networks freeze a TCP connection to foreign hosting after ~16 KB, so Alloy
-# sends through a local relay: a new connection for every request, small batches.
-# The relay reaches Prometheus through the vpnc-net tunnel and resolves the name with
+# Alloy sends to Prometheus through the vpnc-net tunnel and resolves the name with
 # the vpnc-net DNS server.
 prom_remote_write_upstream: "http://prom.{{ vpnc_net_domain }}:{{ hostvars[vpnc_net_server].prom_port | default(9090) }}"
-prom_remote_write_max_samples: 200
+# Some networks freeze a TCP connection to foreign hosting after ~16 KB. With the
+# relay, Alloy sends through a local Caddy that opens a new connection for every
+# request, in small batches. Inside vpnc-net the connection is hidden from DPI, so a
+# probe can go without it: probe_relay: false in the inventory, and Alloy sends
+# straight to Prometheus over one connection, in Alloy's own batch size.
+probe_relay: true
+prom_remote_write_max_samples: "{{ 200 if probe_relay else 2000 }}"

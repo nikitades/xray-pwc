@@ -252,11 +252,20 @@ From a probe in Russia, a TCP connection to some foreign hosting freezes
 after about 16 KB. Small requests pass, bigger ones hang. Grafana Alloy keeps
 one long connection and sends big batches, so its data never arrives.
 
-Every probe runs a small Caddy relay. Alloy sends metrics to the relay, and
-the relay opens a **new** connection to the central server for every request.
-Alloy also sends small batches (200 samples, about 4 KB). See
+By default every probe runs a small Caddy relay. Alloy sends metrics to the
+relay, and the relay opens a **new** connection to the central server for
+every request. Alloy also sends small batches (200 samples, about 4 KB). See
 `prom_remote_write_upstream` and `prom_remote_write_max_samples` in
 `group_vars/probes.yml`.
+
+Inside vpnc-net the connection to Prometheus is hidden in WireGuard, and on a
+probe with service links even inside the VPN link, so the stall may not
+happen at all. Set `probe_relay: false` for such a probe in the inventory:
+there is no relay container, and Alloy sends straight to
+`prom.vpnc-net.internal` over one connection, 2000 samples per batch,
+resolving the name with the vpnc-net DNS server. If `docker logs
+xray-tun-pwc-alloy` then shows `Failed to send batch` again and again, turn
+the relay back on.
 
 ### Caddy on the central server
 

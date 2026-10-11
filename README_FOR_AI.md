@@ -65,7 +65,7 @@ Compose project `xray-tun-pwc`, dir `/opt/xray-tun-pwc`:
 |---|---|---|
 | xray-tun-pwc | `xray-tun-pwc:<srchash>-<arch>` (built locally) | `links.txt` (uid 1000, 0400); probe's own DNS (`probe_dns` override), shm 512m |
 | alloy | grafana/alloy:v1.20.0 | scrapes checker + `prometheus.exporter.unix` (host /proc,/sys,/) every 30s; remote_write to `http://relay:8080/api/v1/write`, max 200 samples/batch; WAL up to 8h |
-| relay | caddy:2.11.7-alpine | reverse_proxy to `prom_remote_write_upstream` = `http://prom.vpnc-net.internal:9090`, `keepalive off` (new TCP per request: some DPI stalls a TCP flow to foreign hosting after ~16 KB); `dns: [vpnc server ip]` |
+| relay | caddy:2.11.7-alpine | optional, `probe_relay` (default true, host var in inventory to turn off). reverse_proxy to `prom_remote_write_upstream` = `http://prom.vpnc-net.internal:9090`, `keepalive off` (new TCP per request: some DPI stalls a TCP flow to foreign hosting after ~16 KB); `dns: [vpnc server ip]`. Without it: Alloy writes to the upstream itself, `dns: [vpnc server ip]` on alloy, batch 2000 instead of 200, `Caddyfile` removed, compose `remove_orphans` drops the container |
 
 Host (not Compose): `vpnc-net.service` (client); `vpnc-net-via.service` only if
 `files/probes/<host>/service_links.txt` exists (see 6.4).

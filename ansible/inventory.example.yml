@@ -25,3 +25,5 @@ all:
           # Optional: DNS servers for the probe containers, when the host resolver
           # gives answers Go programs cannot read (some home routers do).
           # probe_dns: [1.1.1.1, 8.8.8.8]
+          # Optional: no relay, Alloy sends straight to Prometheus (see group_vars/probes.yml).
+          # probe_relay: false # Perhaps you need relaying if the probe ISP is doing much DPI.
