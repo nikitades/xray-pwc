@@ -17,3 +17,6 @@ all:
       hosts:
         probe-1:
           ansible_host: probe-1.example.com
+          # Optional: DNS servers for the probe containers, when the host resolver
+          # gives answers Go programs cannot read (some home routers do).
+          # probe_dns: [1.1.1.1, 8.8.8.8]

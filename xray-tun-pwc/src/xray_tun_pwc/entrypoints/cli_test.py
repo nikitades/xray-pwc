@@ -71,7 +71,7 @@ async def test_cli_app_prints_one_line_per_tunnel(container: Container, settings
     await app.run_once(settings.get_config())
 
     assert capsys.readouterr().out.splitlines() == [
-        "msk - partial[instagram.com: timeout]",
+        "msk - partial[instagram.com: ERR_TIMED_OUT]",
         "spb - failed[tunnel: unsupported share format]",
     ]
 

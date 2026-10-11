@@ -31,11 +31,12 @@ of 2 s, then 4 s. Both lists are plain URLs in the settings.
 The result is the furthest point the check reached, from full failure to
 full success:
 
-| result | meaning | `pwc_tunnel_up` | `perfect` |
-|---|---|---|---|
-| `failed` | the link could not start, or nothing proves that traffic got through | 0 | `false` |
-| `partial` | traffic got through the tunnel, but not every page opened | 1 | `false` |
-| `OK` | every page opened | 1 | `true` |
+| `pwc_tunnel_stage` | result | meaning |
+|---|---|---|
+| `0` | `failed` | the tunnel could not start from this link |
+| `1` | `failed` | nothing proves that traffic got through |
+| `2` | `partial` | traffic got through the tunnel, but not every page opened |
+| `3` | `OK` | every page opened |
 
 Traffic "got through" when a page opened, or a site answered with any HTTP
 status, or a TLS handshake with a site failed. A refused SOCKS connection
@@ -152,42 +153,53 @@ Settings and the Docker image are described in
 
 ## Metrics
 
-Each probe exposes one series per link on `http://<probe>:8000/metrics`:
+Each probe exposes one series per link on `http://<probe>:8000/metrics`. Its
+value is the stage the last check reached:
 
 ```
-pwc_tunnel_up{instance="spb-home-1",tunnel="msk-reality",stable_id="3f9c0d2a71e4b6c8",perfect="true"} 1
-pwc_tunnel_up{instance="spb-home-1",tunnel="ams-ws",stable_id="8a01c7d3e9f25b14",perfect="false"} 1
-pwc_tunnel_up{instance="spb-home-1",tunnel="old-trojan",stable_id="c42e6f0b18a9d357",perfect="false"} 0
+pwc_tunnel_stage{instance="spb-home-1",tunnel="msk-reality",stable_id="3f9c0d2a71e4b6c8"} 3
+pwc_tunnel_stage{instance="spb-home-1",tunnel="ams-ws",stable_id="8a01c7d3e9f25b14"} 2
+pwc_tunnel_stage{instance="spb-home-1",tunnel="old-trojan",stable_id="c42e6f0b18a9d357"} 1
+pwc_tunnel_stage{instance="spb-home-1",tunnel="typo",stable_id="5d7a90c3be41f826"} 0
 ```
 
 Here `msk-reality` opened every page, traffic got through `ams-ws` but not
-every page opened (`partial`), and `old-trojan` failed.
+every page opened, nothing got through `old-trojan`, and `typo` is not a
+valid link.
 
 | label | meaning |
 |---|---|
 | `instance` | the probe (`PWC_INSTANCE`) |
 | `tunnel` | the link name, the text after `#` |
 | `stable_id` | hash of the link without its name; survives renames |
-| `perfect` | `true` when every page opened |
 
-When `perfect` changes, Prometheus starts a new series. Drop the label to get
-one continuous line per link. Useful queries:
+Next to it, `pwc_tunnel_error{error_type="..."}` tells why a check fell
+short: one series per link and error type (`ERR_CONNECTION_RESET`,
+`timeout`, `HTTP 429`, `link_broken`, ...), `1` if the last check met it,
+`0` if only an earlier one did.
+
+Each link keeps one continuous series, whatever the stage. In Grafana, a
+State timeline panel with value mappings (`0` and `1` red, `2` yellow, `3`
+green) shows the whole history at a glance. Useful queries:
 
 ```promql
-# is the link up on this probe at all
-max without (perfect) (pwc_tunnel_up)
+# links that work on this probe, fully or partly
+pwc_tunnel_stage >= 2
 
-# links that are up but lose some sites
-pwc_tunnel_up{perfect="false"} == 1
+# links that work but lose some sites
+pwc_tunnel_stage == 2
 
-# links that are down on every probe: likely the VPN server
-max by (tunnel) (pwc_tunnel_up) == 0
+# links that fail on every probe: likely the VPN server
+max by (tunnel) (pwc_tunnel_stage) < 2
 
-# probes where every link is down: likely the probe or its ISP
-max by (instance) (pwc_tunnel_up) == 0
+# probes where every link fails: likely the probe or its ISP
+max by (instance) (pwc_tunnel_stage) < 2
 
-# share of checks in the last day where the link was up
-avg_over_time((max without (perfect) (pwc_tunnel_up))[1d:5m])
+# why links fail right now, per probe
+pwc_tunnel_error == 1
+
+# share of checks in the last day where the link worked
+avg_over_time((pwc_tunnel_stage >= bool 2)[1d:5m])
 ```
 
 ## Secrets

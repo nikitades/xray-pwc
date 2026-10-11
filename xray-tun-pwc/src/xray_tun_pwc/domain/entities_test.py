@@ -60,7 +60,9 @@ def test_summary_lists_every_failed_site_of_a_connected_tunnel():
         ),
     )
     assert check.success and not check.perfect
-    assert check.summary() == "msk - partial[en.wikipedia.org: timeout, instagram.com: HTTP 429]"
+    assert check.summary() == (
+        "msk - partial[en.wikipedia.org: ERR_TIMED_OUT, instagram.com: HTTP 429]"
+    )
 
 
 def test_summary_of_an_unreachable_tunnel():
@@ -72,14 +74,35 @@ def test_summary_of_an_unreachable_tunnel():
             ),
         ),
     )
-    assert not check.success and not check.perfect
-    assert check.summary() == "msk - failed[en.wikipedia.org: timeout]"
+    assert not check.success and check.perfect
+    assert check.summary() == "msk - failed[en.wikipedia.org: ERR_TIMED_OUT]"
 
 
 def test_summary_of_a_broken_link():
     check = TunnelCheck(SocksTunnel.broken(MSK, 10000, "unsupported share format"), ())
-    assert not check.success and not check.perfect
+    assert not check.success and check.perfect
     assert check.summary() == "msk - failed[tunnel: unsupported share format]"
+
+
+def test_error_kinds_of_a_check_are_its_distinct_site_errors():
+    def failed(site: Site, raw: str) -> SiteVisit:
+        return SiteVisit.failed(site, site.url, 3, SiteVisitError.from_raw(raw))
+
+    check = TunnelCheck(
+        SocksTunnel.alive(MSK, 10000, "vless"),
+        (
+            SiteVisit.succeeded(WIKIPEDIA, WIKIPEDIA.url, attempts=1),
+            failed(WIKIPEDIA, "net::ERR_CONNECTION_CLOSED at x"),
+            failed(INSTAGRAM, "net::ERR_CONNECTION_RESET at x"),
+            failed(INSTAGRAM, "net::ERR_CONNECTION_RESET at x"),
+        ),
+    )
+    assert check.error_kinds == {"ERR_CONNECTION_CLOSED", "ERR_CONNECTION_RESET"}
+
+
+def test_a_broken_link_has_one_error_kind():
+    check = TunnelCheck(SocksTunnel.broken(MSK, 10000, "unsupported share format"), ())
+    assert check.error_kinds == {"link_broken"}
 
 
 ALIVE = SocksTunnel.alive(MSK, 10000, "vless")
@@ -114,10 +137,10 @@ RATE_LIMITED = FailedVisit("HTTP 429 from https://x")
         (TunnelCheck(ALIVE, (TIMED_OUT.on(WIKIPEDIA), TIMED_OUT.on(INSTAGRAM))), Reach.UNREACHABLE),
         (
             TunnelCheck(ALIVE, (TIMED_OUT.on(WIKIPEDIA), RATE_LIMITED.on(INSTAGRAM))),
-            Reach.CONNECTED,
+            Reach.PARTIAL,
         ),
-        (TunnelCheck(ALIVE, (TIMED_OUT.on(WIKIPEDIA), OPENED)), Reach.CONNECTED),
-        (TunnelCheck(ALIVE, (OPENED, OPENED)), Reach.PERFECT),
+        (TunnelCheck(ALIVE, (TIMED_OUT.on(WIKIPEDIA), OPENED)), Reach.PARTIAL),
+        (TunnelCheck(ALIVE, (OPENED, OPENED)), Reach.COMPLETE),
     ],
     ids=[
         "link broken",
@@ -136,16 +159,23 @@ def test_reach_is_the_furthest_stage_the_evidence_proves(check: TunnelCheck, rea
 @pytest.mark.parametrize(
     ("reach", "success", "perfect"),
     [
-        (Reach.LINK_BROKEN, False, False),
-        (Reach.UNREACHABLE, False, False),
-        (Reach.CONNECTED, True, False),
-        (Reach.PERFECT, True, True),
+        (Reach.LINK_BROKEN, False, True),
+        (Reach.UNREACHABLE, False, True),
+        (Reach.PARTIAL, True, False),
+        (Reach.COMPLETE, True, True),
     ],
 )
-def test_reach_decides_success_and_perfect(reach: Reach, success: bool, perfect: bool):
+def test_failure_is_always_complete_and_only_success_can_be_partial(
+    reach: Reach, success: bool, perfect: bool
+):
     assert (reach.success, reach.perfect) == (success, perfect)
 
 
 def test_stages_go_from_full_failure_to_full_success():
     ranks = [reach.rank for reach in Reach]
     assert ranks == sorted(ranks)
+
+
+@pytest.mark.parametrize("reach", list(Reach))
+def test_no_stage_is_a_partial_failure(reach: Reach):
+    assert reach.success or reach.perfect

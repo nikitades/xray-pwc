@@ -128,7 +128,7 @@ msk-trojan - partial[instagram.com: HTTP 429]
 
 1. Log in as `admin` with `vault_grafana_admin_password`.
 2. Add a data source: Prometheus, URL `http://prometheus:9090`.
-3. In Explore, run `pwc_tunnel_up`.
+3. In Explore, run `pwc_tunnel_stage`.
 
 See the [main README](../README.md#metrics) for what the metric means and
 for useful queries. Dashboards and alerts are not part of this repository:

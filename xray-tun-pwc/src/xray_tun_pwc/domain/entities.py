@@ -6,6 +6,9 @@ from attrs import frozen
 
 from xray_tun_pwc.domain.sites import SiteVisit
 
+# The error kind of a link the tunnel could not start from; site errors have their own kinds.
+LINK_BROKEN_KIND = "link_broken"
+
 
 @frozen
 class VpnConfigLine:
@@ -57,19 +60,19 @@ class TunnelGroup:
 class Reach(Enum):
     LINK_BROKEN = (0, "failed")
     UNREACHABLE = (1, "failed")
-    CONNECTED = (2, "partial")
-    PERFECT = (3, "OK")
+    PARTIAL = (2, "partial")
+    COMPLETE = (3, "OK")
 
     def __init__(self, rank: int, label: str) -> None:
         self.rank, self.label = rank, label
 
     @property
     def success(self) -> bool:
-        return self.rank >= Reach.CONNECTED.rank
+        return self.rank >= Reach.PARTIAL.rank
 
     @property
     def perfect(self) -> bool:
-        return self is Reach.PERFECT
+        return self is not Reach.PARTIAL
 
 
 @frozen
@@ -84,8 +87,8 @@ class TunnelCheck:
         if not any(visit.proves_connection for visit in self.visits):
             return Reach.UNREACHABLE
         if not all(visit.ok for visit in self.visits):
-            return Reach.CONNECTED
-        return Reach.PERFECT
+            return Reach.PARTIAL
+        return Reach.COMPLETE
 
     @property
     def success(self) -> bool:
@@ -96,6 +99,12 @@ class TunnelCheck:
         return self.reach.perfect
 
     @property
+    def error_kinds(self) -> frozenset[str]:
+        if not self.tunnel.ok:
+            return frozenset({LINK_BROKEN_KIND})
+        return frozenset(visit.error.kind for visit in self.visits if visit.error)
+
+    @property
     def problems(self) -> tuple[str, ...]:
         if not self.tunnel.ok:
             return (f"tunnel: {self.tunnel.error}",)
@@ -103,6 +112,6 @@ class TunnelCheck:
 
     def summary(self) -> str:
         code, reach = self.tunnel.config.code, self.reach
-        if reach.perfect:
+        if reach is Reach.COMPLETE:
             return f"{code} - {reach.label}"
         return f"{code} - {reach.label}[{', '.join(self.problems)}]"

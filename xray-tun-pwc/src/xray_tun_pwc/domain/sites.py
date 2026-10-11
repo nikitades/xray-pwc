@@ -68,97 +68,99 @@ class SiteCatalog:
 class SiteVisitError(ABC):
     raw: str
 
-    proves_connection: ClassVar[bool]
-
     @classmethod
     def from_raw(cls, raw: str) -> SiteVisitError:
-        kinds: tuple[type[SiteVisitError], ...] = (
-            HttpStatus,
-            TunnelDown,
-            VisitTimeout,
-            ConnectionReset,
-            TlsFailure,
-            DnsFailure,
-        )
+        kinds: tuple[type[SiteVisitError], ...] = (HttpStatus, NetError, VisitTimeout)
         return next((kind(raw) for kind in kinds if kind.matches(raw)), UnrecognizedError(raw))
 
     @classmethod
     @abstractmethod
     def matches(cls, raw: str) -> bool: ...
 
+    @property
     @abstractmethod
-    def to_log(self) -> str: ...
+    def kind(self) -> str:
+        """A short name of the error, the same for every error of this kind."""
+
+    @property
+    @abstractmethod
+    def proves_connection(self) -> bool: ...
+
+    def to_log(self) -> str:
+        return self.kind
 
 
 @frozen
-class MarkedVisitError(SiteVisitError):
-    markers: ClassVar[tuple[str, ...]]
-    label: ClassVar[str]
+class NetError(SiteVisitError):
+    """A Chromium network error. Every code is its own kind: ERR_CONNECTION_RESET,
+    ERR_CONNECTION_CLOSED and ERR_EMPTY_RESPONSE are three different errors."""
+
+    PATTERN: ClassVar[re.Pattern[str]] = re.compile(r"\bnet::(ERR_[A-Z0-9_]+)")
+    # A failed TLS handshake or a bad certificate means the site itself answered.
+    PROVING_PREFIXES: ClassVar[tuple[str, ...]] = ("ERR_SSL_", "ERR_CERT_")
 
     @classmethod
     def matches(cls, raw: str) -> bool:
-        return any(marker in raw for marker in cls.markers)
+        return bool(cls.PATTERN.search(raw))
 
-    def to_log(self) -> str:
-        return self.label
+    @property
+    def kind(self) -> str:
+        match = self.PATTERN.search(self.raw)
+        return match[1] if match else self.raw
 
-
-@frozen
-class TunnelDown(MarkedVisitError):
-    markers = ("ERR_PROXY_CONNECTION_FAILED", "ERR_SOCKS_CONNECTION_FAILED", "ERR_TUNNEL")
-    label = "tunnel"
-    proves_connection = False
-
-
-@frozen
-class VisitTimeout(MarkedVisitError):
-    markers = ("Timeout", "ERR_TIMED_OUT", "ERR_CONNECTION_TIMED_OUT")
-    label = "timeout"
-    proves_connection = False
+    @property
+    def proves_connection(self) -> bool:
+        return self.kind.startswith(self.PROVING_PREFIXES)
 
 
 @frozen
-class ConnectionReset(MarkedVisitError):
-    markers = ("ERR_CONNECTION_RESET", "ERR_CONNECTION_CLOSED", "ERR_EMPTY_RESPONSE")
-    label = "reset"
-    proves_connection = False
+class VisitTimeout(SiteVisitError):
+    """Playwright gave up waiting for the page, Chromium reported no error."""
 
+    @classmethod
+    def matches(cls, raw: str) -> bool:
+        return "Timeout" in raw
 
-@frozen
-class TlsFailure(MarkedVisitError):
-    markers = ("ERR_SSL", "ERR_CERT")
-    label = "tls"
-    proves_connection = True
+    @property
+    def kind(self) -> str:
+        return "timeout"
 
-
-@frozen
-class DnsFailure(MarkedVisitError):
-    markers = ("ERR_NAME_NOT_RESOLVED",)
-    label = "dns"
-    proves_connection = False
+    @property
+    def proves_connection(self) -> bool:
+        return False
 
 
 @frozen
 class HttpStatus(SiteVisitError):
-    proves_connection = True
     PATTERN: ClassVar[re.Pattern[str]] = re.compile(r"^HTTP (\d+|None)\b")
 
     @classmethod
     def matches(cls, raw: str) -> bool:
         return bool(cls.PATTERN.match(raw))
 
-    def to_log(self) -> str:
+    @property
+    def kind(self) -> str:
         match = self.PATTERN.match(self.raw)
         return f"HTTP {match[1]}" if match else self.raw
+
+    @property
+    def proves_connection(self) -> bool:
+        return True
 
 
 @frozen
 class UnrecognizedError(SiteVisitError):
-    proves_connection = False
-
     @classmethod
     def matches(cls, raw: str) -> bool:
         return True
+
+    @property
+    def kind(self) -> str:
+        return "unrecognized"
+
+    @property
+    def proves_connection(self) -> bool:
+        return False
 
     def to_log(self) -> str:
         return self.raw

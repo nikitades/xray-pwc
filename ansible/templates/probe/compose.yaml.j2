@@ -8,6 +8,9 @@ services:
     image: {{ pwc_image }}
     container_name: xray-tun-pwc
     restart: unless-stopped
+{% if probe_dns %}
+    dns: {{ probe_dns | to_json }}
+{% endif %}
     environment:
       PWC_CONFIG_PATH: /config/links.txt
       PWC_INSTANCE: "{{ inventory_hostname }}"
@@ -22,6 +25,9 @@ services:
     image: {{ relay_image }}
     container_name: xray-tun-pwc-relay
     restart: unless-stopped
+{% if probe_dns %}
+    dns: {{ probe_dns | to_json }}
+{% endif %}
     volumes:
       - {{ probe_dir }}/Caddyfile:/etc/caddy/Caddyfile:ro
 
@@ -29,6 +35,9 @@ services:
     image: {{ alloy_image }}
     container_name: xray-tun-pwc-alloy
     restart: unless-stopped
+{% if probe_dns %}
+    dns: {{ probe_dns | to_json }}
+{% endif %}
     command:
       - run
       - /etc/alloy/config.alloy

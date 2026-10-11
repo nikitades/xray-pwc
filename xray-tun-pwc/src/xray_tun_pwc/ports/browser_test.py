@@ -3,7 +3,7 @@ import random
 import pytest
 from attrs import define, field
 
-from xray_tun_pwc.domain.sites import HeavySite, LightSite, SiteCatalog, TunnelDown
+from xray_tun_pwc.domain.sites import HeavySite, LightSite, NetError, SiteCatalog
 from xray_tun_pwc.fakes import LocalPort
 from xray_tun_pwc.ports.browser import Backoff, GaveUp, PlaywrightBrowser, VisitFailed
 
@@ -78,5 +78,5 @@ async def test_dead_tunnel_fails_every_site_after_all_retries(chromium_installed
     for visit in (*heavy, *targets):
         assert not visit.ok
         assert visit.attempts == 2
-        assert isinstance(visit.error, TunnelDown)
-        assert "ERR_PROXY_CONNECTION_FAILED" in visit.error.raw
+        assert isinstance(visit.error, NetError)
+        assert visit.error.kind == "ERR_PROXY_CONNECTION_FAILED"

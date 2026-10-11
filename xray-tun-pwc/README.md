@@ -33,12 +33,14 @@ Every page gets up to three tries. The wait between tries doubles: 2 s, then
 
 The result is the furthest stage the check reached:
 
-| stage | result | meaning | `pwc_tunnel_up` | `perfect` label |
-|---|---|---|---|---|
-| link broken | `failed` | the tunnel could not start from this link | 0 | `false` |
-| unreachable | `failed` | nothing proves that traffic got through | 0 | `false` |
-| connected | `partial` | traffic got through, but not every page opened | 1 | `false` |
-| perfect | `OK` | every page opened | 1 | `true` |
+| stage | `pwc_tunnel_stage` | result | meaning |
+|---|---|---|---|
+| link broken | `0` | `failed` | the tunnel could not start from this link |
+| unreachable | `1` | `failed` | nothing proves that traffic got through |
+| partial | `2` | `partial` | traffic got through, but not every page opened |
+| complete | `3` | `OK` | every page opened |
+
+A failure is always a full failure. Only a success can be partial.
 
 What proves that traffic got through the tunnel:
 
@@ -47,7 +49,7 @@ What proves that traffic got through the tunnel:
 | the page opened | yes |
 | the site answered with any HTTP status | yes |
 | a TLS handshake with the site failed | yes |
-| the SOCKS connection was refused (`tunnel`) | no |
+| the SOCKS connection was refused (`ERR_PROXY_CONNECTION_FAILED`) | no |
 | timeout, reset, DNS error, anything unknown | no: could be a dead server or a stalled connection |
 
 So a link where every page only timed out is `failed`, and a link where
@@ -61,28 +63,27 @@ check:
 ```
 xray-tun-pwc 0.1.0 | instance probe-1 | 3 tunnels | every PT5M + up to PT2M
 msk-reality - OK
-spb-ws - partial[instagram.com: HTTP 429]
+spb-ws - partial[instagram.com: HTTP 429, thesun.co.uk: ERR_CONNECTION_RESET]
 backup - failed[tunnel: unsupported share format]
 ```
 
-Errors are short words, so the log is easy to read:
+Every error is logged by its own name, never grouped with similar ones:
 
-| word | what happened |
+| error | what happened |
 |---|---|
-| `tunnel` | the local tunnel or the VPN server refused the connection |
-| `timeout` | the page did not load in time |
-| `reset` | the connection was closed in the middle |
-| `tls` | the TLS handshake failed or the certificate is wrong |
-| `dns` | the site name could not be resolved |
+| `ERR_...` | Chromium's network error code as is, for example `ERR_CONNECTION_RESET`, `ERR_CONNECTION_CLOSED`, `ERR_EMPTY_RESPONSE`, `ERR_PROXY_CONNECTION_FAILED`, `ERR_SSL_PROTOCOL_ERROR` |
+| `timeout` | the page did not load in time and Chromium reported no error |
 | `HTTP 429` | the site answered, but not with `200` |
+| anything else | an error the checker does not know, printed in full |
 
 ## Metrics
 
-On `http://<host>:8000/metrics`:
+On `http://<host>:8000/metrics`, one series per link. The value is the stage
+from the table above:
 
 ```
-pwc_tunnel_up{instance="probe-1",tunnel="msk-reality",stable_id="3f9c...",perfect="true"} 1.0
-pwc_tunnel_up{instance="probe-1",tunnel="spb-ws",stable_id="8a01...",perfect="false"} 1.0
+pwc_tunnel_stage{instance="probe-1",tunnel="msk-reality",stable_id="3f9c..."} 3
+pwc_tunnel_stage{instance="probe-1",tunnel="spb-ws",stable_id="8a01..."} 2
 ```
 
 - `instance`: the name of this probe (`PWC_INSTANCE`). Compare probes to see
@@ -90,15 +91,26 @@ pwc_tunnel_up{instance="probe-1",tunnel="spb-ws",stable_id="8a01...",perfect="fa
 - `tunnel`: the link's name, the text after `#` in the link.
 - `stable_id`: a hash of the link without its name. Renaming a link does not
   break its history in Prometheus.
-- `perfect`: `true` when every page opened, `false` otherwise.
 
-Each link has one series at a time. When `perfect` changes, Prometheus sees a
-new series and the old one ends. To draw one continuous line per link, drop
-the label:
+The series stays the same when the stage changes, so graphs never break.
+
+Next to it, `pwc_tunnel_error` has one series per link and error type:
+
+```
+pwc_tunnel_error{instance="probe-1",tunnel="spb-ws",stable_id="8a01...",error_type="ERR_CONNECTION_RESET"} 1
+pwc_tunnel_error{instance="probe-1",tunnel="spb-ws",stable_id="8a01...",error_type="HTTP 429"} 0
+```
+
+- `error_type`: the error as in the log (`ERR_...`, `timeout`, `HTTP 429`),
+  `unrecognized` for an unknown error, `link_broken` when the tunnel could not
+  start.
+- The value is `1` if the last check met this error, `0` if only an earlier
+  check did. A link that never failed has no series.
 
 ```promql
-max without (perfect) (pwc_tunnel_up)          # is the link up at all
-count by (tunnel) (pwc_tunnel_up{perfect="false"} == 1)   # probes where a link is only partial
+pwc_tunnel_stage >= 2                          # the link works, fully or partly
+count by (tunnel) (pwc_tunnel_stage == 2)      # probes where a link is only partial
+pwc_tunnel_error == 1                          # what is failing right now, and where
 ```
 
 ## Settings

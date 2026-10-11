@@ -1,40 +1,66 @@
 import pytest
 
 from xray_tun_pwc.domain.sites import (
-    ConnectionReset,
-    DnsFailure,
     HeavySite,
     HttpStatus,
     LightSite,
+    NetError,
     SiteCatalog,
     SiteVisitError,
-    TlsFailure,
-    TunnelDown,
     UnrecognizedError,
     VisitTimeout,
 )
 
 
 @pytest.mark.parametrize(
-    ("raw", "kind", "log"),
+    ("raw", "kind", "name", "log"),
     [
-        ("Page.goto: net::ERR_PROXY_CONNECTION_FAILED at https://x", TunnelDown, "tunnel"),
-        ("Page.goto: net::ERR_SOCKS_CONNECTION_FAILED at https://x", TunnelDown, "tunnel"),
-        ("Page.goto: Timeout 30000ms exceeded.", VisitTimeout, "timeout"),
-        ("Page.goto: net::ERR_TIMED_OUT at https://x", VisitTimeout, "timeout"),
-        ("Page.goto: net::ERR_CONNECTION_RESET at https://x", ConnectionReset, "reset"),
-        ("Page.goto: net::ERR_EMPTY_RESPONSE at https://x", ConnectionReset, "reset"),
-        ("Page.goto: net::ERR_SSL_PROTOCOL_ERROR at https://x", TlsFailure, "tls"),
-        ("Page.goto: net::ERR_CERT_AUTHORITY_INVALID at https://x", TlsFailure, "tls"),
-        ("Page.goto: net::ERR_NAME_NOT_RESOLVED at https://x", DnsFailure, "dns"),
-        ("HTTP 429 from https://www.instagram.com/", HttpStatus, "HTTP 429"),
-        ("HTTP None from https://www.instagram.com/", HttpStatus, "HTTP None"),
-        ("something nobody expected", UnrecognizedError, "something nobody expected"),
+        (
+            "Page.goto: net::ERR_PROXY_CONNECTION_FAILED at https://x",
+            NetError,
+            "ERR_PROXY_CONNECTION_FAILED",
+            "ERR_PROXY_CONNECTION_FAILED",
+        ),
+        (
+            "Page.goto: net::ERR_CONNECTION_RESET at https://x",
+            NetError,
+            "ERR_CONNECTION_RESET",
+            "ERR_CONNECTION_RESET",
+        ),
+        (
+            "Page.goto: net::ERR_CONNECTION_CLOSED at https://x",
+            NetError,
+            "ERR_CONNECTION_CLOSED",
+            "ERR_CONNECTION_CLOSED",
+        ),
+        (
+            "Page.goto: net::ERR_EMPTY_RESPONSE at https://x",
+            NetError,
+            "ERR_EMPTY_RESPONSE",
+            "ERR_EMPTY_RESPONSE",
+        ),
+        ("Page.goto: net::ERR_TIMED_OUT at https://x", NetError, "ERR_TIMED_OUT", "ERR_TIMED_OUT"),
+        (
+            "Page.goto: net::ERR_SSL_PROTOCOL_ERROR at https://x",
+            NetError,
+            "ERR_SSL_PROTOCOL_ERROR",
+            "ERR_SSL_PROTOCOL_ERROR",
+        ),
+        ("Page.goto: Timeout 30000ms exceeded.", VisitTimeout, "timeout", "timeout"),
+        ("HTTP 429 from https://www.instagram.com/", HttpStatus, "HTTP 429", "HTTP 429"),
+        ("HTTP None from https://www.instagram.com/", HttpStatus, "HTTP None", "HTTP None"),
+        (
+            "something nobody expected",
+            UnrecognizedError,
+            "unrecognized",
+            "something nobody expected",
+        ),
     ],
 )
-def test_raw_errors_become_typed_errors(raw: str, kind: type[SiteVisitError], log: str):
+def test_raw_errors_become_typed_errors(raw: str, kind: type[SiteVisitError], name: str, log: str):
     error = SiteVisitError.from_raw(raw)
     assert type(error) is kind
+    assert error.kind == name
     assert error.to_log() == log
     assert error.raw == raw
 
@@ -71,18 +97,20 @@ def test_catalog_allows_skipping_heavy_sites():
 
 
 @pytest.mark.parametrize(
-    ("kind", "proves"),
+    ("raw", "proves"),
     [
-        (TunnelDown, False),
-        (VisitTimeout, False),
-        (ConnectionReset, False),
-        (DnsFailure, False),
-        (UnrecognizedError, False),
-        (TlsFailure, True),
-        (HttpStatus, True),
+        ("net::ERR_PROXY_CONNECTION_FAILED", False),
+        ("net::ERR_SOCKS_CONNECTION_FAILED", False),
+        ("net::ERR_TUNNEL_CONNECTION_FAILED", False),
+        ("net::ERR_TIMED_OUT", False),
+        ("net::ERR_CONNECTION_RESET", False),
+        ("net::ERR_NAME_NOT_RESOLVED", False),
+        ("Timeout 30000ms exceeded.", False),
+        ("something nobody expected", False),
+        ("net::ERR_SSL_PROTOCOL_ERROR", True),
+        ("net::ERR_CERT_AUTHORITY_INVALID", True),
+        ("HTTP 429 from x", True),
     ],
 )
-def test_only_answers_from_beyond_the_tunnel_prove_a_connection(
-    kind: type[SiteVisitError], proves: bool
-):
-    assert kind.proves_connection is proves
+def test_only_answers_from_beyond_the_tunnel_prove_a_connection(raw: str, proves: bool):
+    assert SiteVisitError.from_raw(raw).proves_connection is proves
