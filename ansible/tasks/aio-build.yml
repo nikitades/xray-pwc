@@ -1,0 +1,33 @@
+---
+# Builds what probes.yml delivers into the probe containers, for one CPU type
+# (aio_build_arch), from xray-pwc-aio/Dockerfile, as zstd tar files in
+# aio_package_dir. A file that exists is not built again: the names carry the
+# source hash or the version.
+- name: Create package directory
+  ansible.builtin.file:
+    path: "{{ aio_package_dir }}"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+
+- name: Build packages
+  ansible.builtin.shell: >-
+    set -o pipefail;
+    docker buildx build --quiet --platform linux/{{ aio_build_arch }} --target {{ item.target }}
+    --build-arg RELEASE={{ aio_release }}
+    --build-context pwc={{ playbook_dir }}/../xray-tun-pwc
+    --build-context xtc={{ playbook_dir }}/../xray-tun-connect
+    --build-arg ALLOY_IMAGE=grafana/alloy:{{ aio_alloy_version }}
+    --build-arg CADDY_IMAGE=caddy:{{ aio_caddy_version }}-alpine
+    --output type=tar,dest=- {{ aio_source_dir }}
+    | zstd -q -T0 -o {{ item.file }}.part && mv {{ item.file }}.part {{ item.file }}
+  args:
+    executable: /bin/bash
+    creates: "{{ item.file }}"
+  loop:
+    - { target: release, file: "{{ aio_package_dir }}/release-{{ aio_release }}-{{ aio_build_arch }}.tar.zst" }
+    - { target: alloy, file: "{{ aio_package_dir }}/alloy-{{ aio_alloy_version }}-{{ aio_build_arch }}.tar.zst" }
+    - { target: caddy, file: "{{ aio_package_dir }}/caddy-{{ aio_caddy_version }}-{{ aio_build_arch }}.tar.zst" }
+  loop_control:
+    label: "{{ item.file | basename }}"
+  delegate_to: localhost

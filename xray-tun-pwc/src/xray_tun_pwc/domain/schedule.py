@@ -16,7 +16,11 @@ class CheckSchedule:
     def next_delay(self) -> timedelta:
         return self.interval + self.jitter * self.rng.random()
 
+    def interval_iso(self) -> str:
+        return ISO_8601.dump_python(self.interval, mode="json")
+
+    def jitter_iso(self) -> str:
+        return ISO_8601.dump_python(self.jitter, mode="json")
+
     def __str__(self) -> str:
-        interval = ISO_8601.dump_python(self.interval, mode="json")
-        jitter = ISO_8601.dump_python(self.jitter, mode="json")
-        return f"every {interval} + up to {jitter}"
+        return f"every {self.interval_iso()} + up to {self.jitter_iso()}"

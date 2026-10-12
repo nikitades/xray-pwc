@@ -20,7 +20,7 @@ from xray_tun_pwc.domain.sites import Site, SiteCatalog, SiteVisit, SiteVisitErr
 
 @define
 class FakeXrayTunConnect(XrayTunConnect):
-    reported_version: str = "0.1.0"
+    reported_version: str = "0.5.0"
     broken_tags: frozenset[str] = frozenset()
     started_with: tuple[VpnConfigLine, ...] = ()
     running: bool = False

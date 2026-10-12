@@ -1,0 +1,37 @@
+#!/bin/bash
+# The vpnc-net interface, from /app/state/wg/vpnc-net.conf. The kernel's
+# WireGuard when the host has it loaded, otherwise wireguard-go. While up,
+# it logs when the handshake with the server goes stale and comes back.
+. /usr/local/lib/aio/common.sh
+conf=$STATE/wg/vpnc-net.conf
+iface=vpnc-net
+[[ -f $conf ]] || idle "no $conf"
+
+export WG_QUICK_USERSPACE_IMPLEMENTATION=wireguard-go WG_ENDPOINT_RESOLUTION_RETRIES=infinity
+# Left over from a crash, the interface would make wg-quick refuse.
+wg-quick down "$conf" >/dev/null 2>&1 || true
+if ! out=$(wg-quick up "$conf" 2>&1); then
+	say ERROR up_failed err="$(quoted "$(tail -n 3 <<<"$out" | tr '\n' ' ')")"
+	exec sleep 30
+fi
+impl=kernel
+grep -q wireguard-go <<<"$out" && impl=wireguard-go
+say INFO up iface=$iface address="$(ip -4 -o addr show dev $iface | awk '{print $4}')" \
+	endpoint="$(wg show $iface endpoints | awk '{print $2}')" impl=$impl
+
+trap 'exit 0' TERM INT
+# ok/lost changes are logged; a new interface gets $stale seconds for the first one.
+stale=180 state=new started=$(date +%s)
+while sleep 30 & wait $!; do
+	last=$(wg show $iface latest-handshakes 2>/dev/null | awk 'NR == 1 { print $2 }')
+	[[ -n $last ]] || { say ERROR interface_gone iface=$iface; exit 1; }
+	now=$(date +%s)
+	if (( last > 0 && now - last < stale )); then
+		[[ $state == ok ]] || say INFO handshake_ok age=$(( now - last ))s
+		state=ok
+	elif [[ $state == ok ]] || [[ $state == new && $(( now - started )) -ge $stale ]]; then
+		if (( last == 0 )); then age=never; else age=$(( now - last ))s; fi
+		say WARN handshake_lost age=$age
+		state=lost
+	fi
+done

@@ -1,0 +1,2 @@
+# Rotates /app/logs/aio.log; logrotate itself decides when a week is over.
+17 3 * * * /usr/sbin/logrotate --state /app/state/logrotate.status /usr/local/lib/aio/logrotate.conf 2>&1 | /usr/local/bin/aio-log logrotate

@@ -1,0 +1,35 @@
+# The vpnc-net probe {{ inventory_hostname }} ({{ vpnc_net_ip }}). Made by vpnc-net-join.yml.
+# PRIVATE: VPNC_JOIN holds the probe's vpnc-net key. In a folder of its own on the probe:
+#   docker compose up -d
+# The token is read on the first start only, into ./state; from then on Ansible
+# manages the state through vpnc-net.
+name: xray-pwc-aio
+services:
+  aio:
+    image: {{ aio_image }}
+    container_name: xray-pwc-aio
+    hostname: {{ inventory_hostname }}
+    restart: unless-stopped
+    cap_add: [NET_ADMIN]
+    devices: [/dev/net/tun]
+    # Chromium runs out of Docker's default 64 MB on heavy pages.
+    shm_size: 512m
+{% if probe_dns %}
+    dns: {{ probe_dns | to_json }}
+{% endif %}
+    environment:
+      VPNC_JOIN: "{{ vpnc_net_join_token }}"
+    volumes:
+      # Releases and tools: Ansible brings them again if this volume is lost.
+      - app:/app
+      # What is worth keeping, here on the host: keys, links, settings, Alloy's buffer.
+      - ./state:/app/state
+      # The log: aio.log for this week, aio.log.1 to .4.gz for the four before.
+      - ./logs:/app/logs
+      # The host's CPU, memory, disks and network, for Alloy.
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+
+volumes:
+  app:

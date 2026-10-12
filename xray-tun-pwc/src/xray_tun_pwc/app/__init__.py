@@ -45,7 +45,9 @@ class XrayLogLevel(StrEnum):
 class TunnelOptions:
     start_port: int = 10000
     listen: str = "127.0.0.1"
-    xray_log_level: XrayLogLevel = XrayLogLevel.WARNING
+    # xray-core's own lines are not in the log format; its warnings include a
+    # "started" line on every check.
+    xray_log_level: XrayLogLevel = XrayLogLevel.ERROR
     ready_timeout: timedelta = timedelta(seconds=10)
 
 

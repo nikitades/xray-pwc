@@ -1,0 +1,10 @@
+Port 22
+HostKey /app/state/ssh/ssh_host_ed25519_key
+AuthorizedKeysFile /app/state/ssh/authorized_keys
+PermitRootLogin prohibit-password
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+UsePAM no
+PrintMotd no
+PidFile /run/sshd.pid
+Subsystem sftp internal-sftp

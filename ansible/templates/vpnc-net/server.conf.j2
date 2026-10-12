@@ -1,12 +1,15 @@
 # {{ ansible_managed }}
+# wg-quick@{{ vpnc_net_interface }}. Peers reach only this host: traffic between them is
+# dropped. Names in {{ vpnc_net_domain }} go to CoreDNS on {{ vpnc_net_ip }}, for this
+# host too, so `ssh -J` through it finds the probes by name.
 [Interface]
 PrivateKey = {{ vpnc_net_private_key }}
 Address = {{ vpnc_net_ip }}/{{ vpnc_net_subnet.split('/')[1] }}
 ListenPort = {{ vpnc_net_port }}
 MTU = {{ vpnc_net_mtu }}
-{% include 'obfuscation.j2' %}
-PostUp = {{ vpnc_net_conf_dir }}/firewall.sh up
-PostDown = {{ vpnc_net_conf_dir }}/firewall.sh down
+PostUp = iptables -I FORWARD -i %i -o %i -j DROP
+PostUp = resolvectl dns %i {{ vpnc_net_ip }}; resolvectl domain %i '~{{ vpnc_net_domain }}'; resolvectl default-route %i false
+PostDown = iptables -D FORWARD -i %i -o %i -j DROP
 {% for host in vpnc_net_members if host != inventory_hostname %}
 
 [Peer]

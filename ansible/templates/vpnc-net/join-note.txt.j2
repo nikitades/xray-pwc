@@ -1,23 +1,16 @@
 {% if vpnc_net_join_server %}
 {{ inventory_hostname }} is the vpnc-net server ({{ vpnc_net_ip }}): ansible-playbook monitoring.yml sets it up.
-{% elif vpnc_net_join_laptop %}
-{{ inventory_hostname }} ({{ vpnc_net_ip }}) is in vpnc-net.
-
-1. Import {{ vpnc_net_join_conf }} into the AmneziaWG app, then delete the file.
-2. For the names in {{ vpnc_net_domain }}, on macOS:
-     sudo mkdir -p /etc/resolver && echo 'nameserver {{ vpnc_net_server_ip }}' | sudo tee /etc/resolver/{{ vpnc_net_domain }}
 {% else %}
-{{ inventory_hostname }} ({{ vpnc_net_ip }}) is in vpnc-net. The join file:
+{{ inventory_hostname }} ({{ vpnc_net_ip }}) is in vpnc-net. Its compose file:
 
-  {{ vpnc_net_join_file }}
-  {{ vpnc_net_join_sum.stdout | trim }}
-  passphrase: {{ vpnc_net_join_pass.stdout }}
+  {{ vpnc_net_join_compose }}
 
-1. Send the file and the passphrase to the machine by different channels.
-2. There, as {{ ansible_user | default('the user Ansible will log in as') }} (with sudo):
-     bash {{ vpnc_net_join_file | basename }}
-   It checks the machine, installs the tunnel and waits for the server.
-3. Here: put the links into files/probes/{{ inventory_hostname }}/, then
+It is private: VPNC_JOIN holds the probe's key. {{ 'The tunnel goes through the service links.' if vpnc_net_via else 'The tunnel goes straight to ' ~ vpnc_net_endpoint ~ ' over UDP; put links into files/probes/' ~ inventory_hostname ~ '/service_links.txt and run this again if the network blocks it.' }}
+
+1. On the machine (Linux or macOS with Docker), in a folder of its own:
+     docker compose up -d
+   Then `tail -f logs/aio.log` there: "wg INFO handshake_ok" means it is in.
+2. Here: put the links to check into files/probes/{{ inventory_hostname }}/links.txt, then
      ansible-playbook probes.yml --limit {{ inventory_hostname }}
-4. Delete the join file everywhere, and this note.
+3. Delete compose.yml here once it runs there; the machine keeps its own copy.
 {% endif %}

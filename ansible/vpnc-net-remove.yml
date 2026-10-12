@@ -1,7 +1,7 @@
 ---
-# Removes a member from vpnc-net: forgets its address and keys here and tells
-# the server. For a probe, clean it first, while Ansible still reaches it:
-#   ansible-playbook probes-clean.yml --limit <name> -e vpnc_net_remove=true
+# Removes a member from vpnc-net: forgets its address, keys and compose file here
+# and tells the server. Its links in files/probes/<name>/ stay: yours to delete.
+# Take the probe's container down on its host first (probes-clean.yml).
 #   ansible-playbook vpnc-net-remove.yml -e name=<name>
 - name: Forget the vpnc-net member
   hosts: localhost
@@ -26,9 +26,10 @@
       ansible.builtin.file:
         path: "{{ item }}"
         state: absent
-      loop: "{{ [playbook_dir ~ '/host_vars/' ~ name,
-                 playbook_dir ~ '/inventory.d/' ~ name ~ '.yml']
-                + query('fileglob', vpnc_net_join_dir ~ '/' ~ name ~ '[.-]*') }}"
+      loop:
+        - "{{ playbook_dir }}/host_vars/{{ name }}"
+        - "{{ playbook_dir }}/inventory.d/{{ name }}.yml"
+        - "{{ vpnc_net_join_dir }}/{{ name }}"
 
     - name: Reload inventory
       ansible.builtin.meta: refresh_inventory
@@ -41,8 +42,6 @@
 - name: Tell the vpnc-net server
   hosts: monitoring
   become: true
-  vars_files:
-    - vault.yml
 
   handlers:
     - name: Vpnc-net handlers

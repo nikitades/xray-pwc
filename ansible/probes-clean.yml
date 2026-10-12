@@ -1,45 +1,56 @@
 ---
-# Removes the xray-tun-pwc stack from the probes, with its data and images.
-# -e vpnc_net_remove=true also removes the vpnc-net tunnel.
-- name: Clean the probes
+# Takes a probe's container away on its host, with its state, log, volume and
+# image, and the folder of compose.yml. Nothing else on the host was touched by
+# this project. Needs SSH to the host, like probes-host.yml. Then forget the
+# member: ansible-playbook vpnc-net-remove.yml -e name=<probe>
+#   ansible-playbook probes-clean.yml --limit <probe>
+- name: Clean the probe hosts
   hosts: probes
-  become: true
+  gather_facts: false
+  vars:
+    ansible_host: "{{ probe_host }}"
+    ansible_user: "{{ probe_host_user | default(omit) }}"
+    ansible_port: "{{ probe_host_port | default(22) }}"
+    ansible_ssh_common_args: ""
+    ansible_python_interpreter: auto_silent
+
+  pre_tasks:
+    - name: Check the host is known
+      ansible.builtin.assert:
+        that: probe_host is defined
+        fail_msg: >-
+          no probe_host for {{ inventory_hostname }} in the inventory. On the host, in the
+          folder of compose.yml: docker compose down -v --rmi all, then delete the folder.
+        quiet: true
 
   tasks:
-    - name: Find probe stack
+    # become changes the home, so the folder gets an absolute path first.
+    - name: Find the folder
+      ansible.builtin.command: printenv HOME
+      register: probe_home
+      changed_when: false
+      check_mode: false
+
+    - name: Pick the folder
+      ansible.builtin.set_fact:
+        probe_folder: "{{ probe_host_dir if probe_host_dir is abs else probe_home.stdout ~ '/' ~ probe_host_dir }}"
+
+    - name: Find the compose file
       ansible.builtin.stat:
-        path: "{{ probe_dir }}/compose.yaml"
-      register: probe_stack
+        path: "{{ probe_folder }}/compose.yml"
+      register: probe_compose
 
-    - name: Stop probe stack
-      community.docker.docker_compose_v2:
-        project_src: "{{ probe_dir }}"
-        state: absent
-        remove_volumes: true
-        remove_orphans: true
-      when: probe_stack.stat.exists and not ansible_check_mode
+    - name: Take the container down
+      ansible.builtin.command: docker compose down -v --rmi all --remove-orphans
+      args:
+        chdir: "{{ probe_folder }}"
+      become: true
+      changed_when: true
+      when: probe_compose.stat.exists and not ansible_check_mode
 
-    - name: Remove probe directory
+    # state/ and logs/ belong to root: the container wrote them.
+    - name: Remove the folder
       ansible.builtin.file:
-        path: "{{ probe_dir }}"
+        path: "{{ probe_folder }}"
         state: absent
-
-    - name: Remove probe images
-      ansible.builtin.shell: >-
-        docker image ls --format '{% raw %}{{.Repository}}:{{.Tag}}{% endraw %}'
-        | grep -E '^(xray-tun-pwc|grafana/alloy|caddy):'
-        | xargs -r docker image rm
-      register: removed_images
-      changed_when: removed_images.stdout | length > 0
-
-    # Only with -e vpnc_net_remove=true (see vpnc-net-remove.yml): Ansible may be talking
-    # to the probe through this very tunnel. A transient unit does the work, so it
-    # finishes after the connection drops.
-    - name: Remove vpnc-net
-      ansible.builtin.command: >-
-        systemd-run --collect --unit=vpnc-net-remove /bin/sh -c
-        'sleep 2; systemctl disable --now vpnc-net vpnc-net-via;
-        rm -rf /etc/systemd/system/vpnc-net.service /etc/systemd/system/vpnc-net-via.service
-        {{ vpnc_net_conf_dir }} {{ vpnc_net_bin_dir | dirname }};
-        systemctl daemon-reload'
-      when: vpnc_net_remove | default(false) | bool
+      become: true

@@ -72,8 +72,7 @@ func TestVersion(t *testing.T) {
 func TestUsageErrors(t *testing.T) {
 	for _, args := range [][]string{
 		{"-forward", "nohost"},
-		{"-forward", "h:1", "-health-url", "ftp://x"},
-		{"-forward", "h:1", "-health-url", "not a url"},
+		{"-health-url", "http://x"},
 		{"-no-such-flag"},
 	} {
 		if code, _, _ := runCLI(t, args...); code != 2 {
@@ -82,7 +81,7 @@ func TestUsageErrors(t *testing.T) {
 	}
 }
 
-func TestDefaultModeHasNoDirect(t *testing.T) {
+func TestDefaultModeReportsAndLogs(t *testing.T) {
 	code, stdout, stderr := runCLI(t, "-start-port", freePort(t))
 	if code != 0 {
 		t.Fatalf("code %d: %s", code, stderr)
@@ -90,24 +89,30 @@ func TestDefaultModeHasNoDirect(t *testing.T) {
 	if names := reportNames(t, stdout); len(names) != 1 || names[0] != "ok" {
 		t.Errorf("tunnels = %q", names)
 	}
-}
-
-func TestForwardAddsDirectLast(t *testing.T) {
-	code, stdout, stderr := runCLI(t, "-forward", "127.0.0.1:9", "-start-port", freePort(t))
-	if code != 0 {
-		t.Fatalf("code %d: %s", code, stderr)
-	}
-	if names := reportNames(t, stdout); len(names) != 2 || names[0] != "ok" || names[1] != "direct" {
-		t.Errorf("tunnels = %q", names)
+	if !strings.Contains(stderr, "INFO start version="+version) {
+		t.Errorf("no start line in stderr: %q", stderr)
 	}
 }
 
-func TestForwardDisableDirect(t *testing.T) {
-	code, stdout, stderr := runCLI(t, "-forward", "127.0.0.1:9", "-start-port", freePort(t), "-disable-direct")
-	if code != 0 {
-		t.Fatalf("code %d: %s", code, stderr)
-	}
-	if names := reportNames(t, stdout); len(names) != 1 || names[0] != "ok" {
-		t.Errorf("tunnels = %q", names)
+// Forward mode has no report: it only logs, direct included unless disabled.
+func TestForwardLogsItsStart(t *testing.T) {
+	for _, c := range []struct {
+		args   []string
+		direct string
+	}{
+		{nil, "direct=true"},
+		{[]string{"-disable-direct"}, "direct=false"},
+	} {
+		args := append([]string{"-forward", "127.0.0.1:9", "-start-port", freePort(t), "-check-timeout", "300ms"}, c.args...)
+		code, stdout, stderr := runCLI(t, args...)
+		if code != 0 {
+			t.Fatalf("%v: code %d: %s", c.args, code, stderr)
+		}
+		if stdout != "" {
+			t.Errorf("%v: stdout = %q, want nothing", c.args, stdout)
+		}
+		if !strings.Contains(stderr, "INFO start ") || !strings.Contains(stderr, "links=1 "+c.direct) {
+			t.Errorf("%v: stderr = %q", c.args, stderr)
+		}
 	}
 }

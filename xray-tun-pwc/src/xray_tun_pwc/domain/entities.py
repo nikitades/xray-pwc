@@ -58,13 +58,13 @@ class TunnelGroup:
 
 
 class Reach(Enum):
-    LINK_BROKEN = (0, "failed")
-    UNREACHABLE = (1, "failed")
+    LINK_BROKEN = (0, "link_broken")
+    UNREACHABLE = (1, "unreachable")
     PARTIAL = (2, "partial")
-    COMPLETE = (3, "OK")
+    COMPLETE = (3, "ok")
 
-    def __init__(self, rank: int, label: str) -> None:
-        self.rank, self.label = rank, label
+    def __init__(self, rank: int, result: str) -> None:
+        self.rank, self.result = rank, result
 
     @property
     def success(self) -> bool:
@@ -110,8 +110,18 @@ class TunnelCheck:
             return (f"tunnel: {self.tunnel.error}",)
         return tuple(visit.to_log() for visit in self.visits if not visit.ok)
 
-    def summary(self) -> str:
-        code, reach = self.tunnel.config.code, self.reach
-        if reach is Reach.COMPLETE:
-            return f"{code} - {reach.label}"
-        return f"{code} - {reach.label}[{', '.join(self.problems)}]"
+    @property
+    def log_level(self) -> str:
+        if self.reach is Reach.COMPLETE:
+            return "INFO"
+        return "WARN" if self.reach is Reach.PARTIAL else "ERROR"
+
+    def log_fields(self) -> dict[str, str | int]:
+        fields: dict[str, str | int] = {
+            "name": self.tunnel.config.code,
+            "result": self.reach.result,
+            "stage": self.reach.rank,
+        }
+        if self.problems:
+            fields["failed"] = ", ".join(self.problems)
+        return fields

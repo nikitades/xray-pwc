@@ -1,0 +1,1 @@
+with-contenv /usr/local/bin/aio-run entrypoint /usr/local/bin/python3 /usr/local/lib/aio/bootstrap.py

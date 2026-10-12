@@ -1,9 +1,0 @@
----
-# Written by probes.yml: Ansible reaches this probe through vpnc-net.
-# -e vpnc_net_ssh=false: back to the old address.
-vpnc_net_ssh_old_host: {{ ansible_host }}
-ansible_host: "{{ '{{' }} vpnc_net_ip if vpnc_net_ssh | default(true) | bool else vpnc_net_ssh_old_host {{ '}}' }}"
-ansible_user: {{ vpnc_net_ssh_user }}
-ansible_port: {{ vpnc_net_ssh_port }}
-ansible_ssh_private_key_file: {{ vpnc_net_ssh_private_key }}
-ansible_ssh_common_args: "{{ '{{' }} vpnc_net_ssh_args {{ '}}' }}"

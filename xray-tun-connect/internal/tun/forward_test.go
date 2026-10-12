@@ -2,11 +2,12 @@ package tun
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net"
-	"net/http"
-	"net/http/httptest"
+	"net/netip"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 )
@@ -15,11 +16,61 @@ func namedLink(name string) string {
 	return "trojan://pw@198.51.100.12:443?security=tls&sni=t.example.com#" + name
 }
 
+// links decides which links pass the check, by name; the test changes it on the fly.
+type links struct {
+	mu   sync.Mutex
+	good map[string]bool
+}
+
+func (l *links) set(name string, good bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.good[name] = good
+}
+
+func (l *links) check(_ context.Context, link, _ string) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.good[linkName(link)] {
+		return nil
+	}
+	return errors.New("dns timeout")
+}
+
+func forwardOptions(t *testing.T, good *links, names ...string) ForwardOptions {
+	var all []string
+	for _, n := range names {
+		all = append(all, namedLink(n))
+	}
+	return ForwardOptions{
+		Options: Options{
+			Links:        all,
+			StartPort:    freePortBase(t),
+			ReadyTimeout: 5 * time.Second,
+			Forward:      &Target{Host: "127.0.0.1", Port: 9},
+		},
+		Direct:         true,
+		CheckInterval:  50 * time.Millisecond,
+		CheckTimeout:   300 * time.Millisecond,
+		CheckFails:     2,
+		NoTunnelsEvery: 200 * time.Millisecond,
+		check:          good.check,
+	}
+}
+
+func newLinks(good ...string) *links {
+	l := &links{good: map[string]bool{}}
+	for _, n := range good {
+		l.good[n] = true
+	}
+	return l
+}
+
 // runForward starts Forward in the background and returns its events.
-func runForward(t *testing.T, opts ForwardOptions) (<-chan Event, context.CancelFunc) {
+func runForward(t *testing.T, opts ForwardOptions) <-chan Event {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	events := make(chan Event, 100)
+	events := make(chan Event, 1000)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -28,134 +79,147 @@ func runForward(t *testing.T, opts ForwardOptions) (<-chan Event, context.Cancel
 		}
 	}()
 	t.Cleanup(func() { cancel(); <-done })
-	return events, cancel
+	return events
 }
 
-func next(t *testing.T, events <-chan Event) Event {
+// waitFor skips events until one matches, and fails after 10 s.
+func waitFor(t *testing.T, events <-chan Event, match func(Event) bool) Event {
 	t.Helper()
-	select {
-	case e := <-events:
-		return e
-	case <-time.After(10 * time.Second):
-		t.Fatal("no event")
-		return Event{}
-	}
-}
-
-func health(status int) *httptest.Server {
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(status) }))
-}
-
-func forwardOptions(t *testing.T, links ...string) ForwardOptions {
-	return ForwardOptions{
-		Options: Options{
-			Links:        links,
-			StartPort:    freePortBase(t),
-			ReadyTimeout: 5 * time.Second,
-			Forward:      &Target{Host: "127.0.0.1", Port: 9},
-		},
-		HealthInterval: 50 * time.Millisecond,
-		HealthTimeout:  300 * time.Millisecond,
-		HealthFails:    2,
-	}
-}
-
-func TestForwardRotatesOnTheSamePort(t *testing.T) {
-	srv := health(http.StatusInternalServerError)
-	defer srv.Close()
-	opts := forwardOptions(t, namedLink("a"), namedLink("b"))
-	opts.HealthURL = srv.URL
-	events, _ := runForward(t, opts)
-
-	want := []Event{
-		{Event: "active", Index: 0, Name: "a"},
-		{Event: "failed", Index: 0, Name: "a"},
-		{Event: "active", Index: 1, Name: "b"},
-	}
-	for _, w := range want {
-		got := next(t, events)
-		if got.Event != w.Event || got.Index != w.Index || got.Name != w.Name {
-			t.Fatalf("event = %+v, want %+v", got, w)
-		}
-		if got.Event == "failed" && got.Reason == "" {
-			t.Errorf("failed without a reason: %+v", got)
+	deadline := time.After(10 * time.Second)
+	for {
+		select {
+		case e := <-events:
+			if match(e) {
+				return e
+			}
+		case <-deadline:
+			t.Fatal("no matching event")
+			return Event{}
 		}
 	}
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(opts.StartPort)), time.Second)
+}
+
+func kind(k string) func(Event) bool { return func(e Event) bool { return e.Kind == k } }
+
+// quiet fails if a switch-like event comes within d.
+func quiet(t *testing.T, events <-chan Event, d time.Duration) {
+	t.Helper()
+	deadline := time.After(d)
+	for {
+		select {
+		case e := <-events:
+			if e.Kind == "switch" || e.Kind == "active" {
+				t.Fatalf("unexpected %+v", e)
+			}
+		case <-deadline:
+			return
+		}
+	}
+}
+
+func served(t *testing.T, port int) bool {
+	t.Helper()
+	c, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), 200*time.Millisecond)
 	if err != nil {
-		t.Fatalf("the port is not served after a switch: %v", err)
+		return false
 	}
-	conn.Close()
-	// Round robin: back to the first link.
-	if e := next(t, events); e.Event != "failed" || e.Index != 1 {
-		t.Fatalf("event = %+v", e)
+	c.Close()
+	return true
+}
+
+func TestForwardTakesTheFirstUsableLink(t *testing.T) {
+	opts := forwardOptions(t, newLinks("b", "c"), "a", "b", "c")
+	events := runForward(t, opts)
+
+	if e := waitFor(t, events, kind("active")); e.Name != "b" || e.Index != 1 {
+		t.Fatalf("active = %+v, want b", e)
 	}
-	if e := next(t, events); e.Event != "active" || e.Index != 0 {
-		t.Fatalf("event = %+v", e)
+	if !served(t, opts.StartPort) {
+		t.Fatal("the port is not served")
 	}
 }
 
-func TestForwardKeepsHealthyLink(t *testing.T) {
-	srv := health(http.StatusOK)
-	defer srv.Close()
-	opts := forwardOptions(t, namedLink("a"), namedLink("b"))
-	opts.HealthURL = srv.URL
-	events, _ := runForward(t, opts)
+func TestForwardKeepsTheLinkWhenAnEarlierOneRecovers(t *testing.T) {
+	good := newLinks("b")
+	events := runForward(t, forwardOptions(t, good, "a", "b"))
 
-	if e := next(t, events); e.Event != "active" || e.Index != 0 {
-		t.Fatalf("event = %+v", e)
+	if e := waitFor(t, events, kind("active")); e.Name != "b" {
+		t.Fatalf("active = %+v", e)
 	}
-	select {
-	case e := <-events:
-		t.Fatalf("a healthy link was replaced: %+v", e)
-	case <-time.After(500 * time.Millisecond):
+	good.set("a", true)
+	waitFor(t, events, func(e Event) bool { return e.Kind == "link_usable" && e.Name == "a" })
+	quiet(t, events, 300*time.Millisecond)
+}
+
+func TestForwardMovesToTheFirstUsableLink(t *testing.T) {
+	good := newLinks("a", "b", "c")
+	opts := forwardOptions(t, good, "a", "b", "c")
+	events := runForward(t, opts)
+
+	if e := waitFor(t, events, kind("active")); e.Name != "a" {
+		t.Fatalf("active = %+v", e)
+	}
+	good.set("a", false)
+	e := waitFor(t, events, kind("link_unusable"))
+	if e.Name != "a" || e.Fails != 2 || e.Reason == "" {
+		t.Fatalf("link_unusable = %+v", e)
+	}
+	e = waitFor(t, events, kind("switch"))
+	if e.From != "a" || e.To != "b" || e.Reason != "unusable" {
+		t.Fatalf("switch = %+v", e)
+	}
+	if !served(t, opts.StartPort) {
+		t.Fatal("the port is not served after a switch")
 	}
 }
 
-func TestForwardDoesNotCheckASingleLink(t *testing.T) {
-	srv := health(http.StatusInternalServerError)
-	defer srv.Close()
-	opts := forwardOptions(t, namedLink("only"))
-	opts.HealthURL = srv.URL
-	events, _ := runForward(t, opts)
+// Direct is the last resort: the port leaves it as soon as a link is usable.
+func TestForwardLeavesDirectWhenALinkRecovers(t *testing.T) {
+	good := newLinks()
+	events := runForward(t, forwardOptions(t, good, "a", "b"))
 
-	if e := next(t, events); e.Event != "active" {
-		t.Fatalf("event = %+v", e)
+	if e := waitFor(t, events, kind("active")); e.Name != "direct" {
+		t.Fatalf("active = %+v", e)
 	}
-	select {
-	case e := <-events:
-		t.Fatalf("a single link was checked: %+v", e)
-	case <-time.After(500 * time.Millisecond):
+	good.set("b", true)
+	e := waitFor(t, events, kind("switch"))
+	if e.From != "direct" || e.To != "b" || e.Reason != "link_recovered" {
+		t.Fatalf("switch = %+v", e)
 	}
 }
 
-// Without a health URL the probe goes through the link; this one leads nowhere.
-func TestForwardProbesThroughTheLink(t *testing.T) {
-	events, _ := runForward(t, forwardOptions(t, namedLink("a"), namedLink("b")))
+func TestForwardWithoutDirectStopsAndRepeatsNoTunnels(t *testing.T) {
+	good := newLinks()
+	opts := forwardOptions(t, good, "a")
+	opts.Direct = false
+	events := runForward(t, opts)
 
-	if e := next(t, events); e.Event != "active" || e.Index != 0 {
-		t.Fatalf("event = %+v", e)
+	start := time.Now()
+	waitFor(t, events, kind("no_tunnels"))
+	waitFor(t, events, kind("no_tunnels"))
+	if time.Since(start) < opts.NoTunnelsEvery {
+		t.Error("no_tunnels repeats faster than NoTunnelsEvery")
 	}
-	if e := next(t, events); e.Event != "failed" || e.Index != 0 {
-		t.Fatalf("event = %+v", e)
+	if served(t, opts.StartPort) {
+		t.Fatal("the port is served with no usable link")
 	}
-	if e := next(t, events); e.Event != "active" || e.Index != 1 {
-		t.Fatalf("event = %+v", e)
+	good.set("a", true)
+	if e := waitFor(t, events, kind("active")); e.Name != "a" {
+		t.Fatalf("active = %+v", e)
 	}
 }
 
-func TestForwardSkipsLinksThatDoNotStart(t *testing.T) {
-	srv := health(http.StatusOK)
-	defer srv.Close()
-	opts := forwardOptions(t, "garbage", namedLink("b"))
-	opts.HealthURL = srv.URL
-	events, _ := runForward(t, opts)
+func TestForwardRejectsLinksThatDoNotParse(t *testing.T) {
+	good := newLinks("b")
+	opts := forwardOptions(t, good, "b")
+	opts.Links = append([]string{"garbage"}, opts.Links...)
+	events := runForward(t, opts)
 
-	if e := next(t, events); e.Event != "failed" || e.Index != 0 || e.Reason == "" {
-		t.Fatalf("event = %+v", e)
+	if e := waitFor(t, events, kind("link_rejected")); e.Index != 0 || e.Reason == "" {
+		t.Fatalf("link_rejected = %+v", e)
 	}
-	if e := next(t, events); e.Event != "active" || e.Index != 1 {
-		t.Fatalf("event = %+v", e)
+	if e := waitFor(t, events, kind("active")); e.Index != 1 {
+		t.Fatalf("active = %+v", e)
 	}
 }
 
@@ -220,33 +284,73 @@ func roundTrip(t *testing.T, network string, port int) {
 
 // The port really carries TCP and UDP to the target, here without a VPN.
 func TestForwardCarriesTCPAndUDP(t *testing.T) {
-	opts := forwardOptions(t, DirectLink)
+	opts := forwardOptions(t, newLinks())
 	opts.Forward = echo(t)
-	events, _ := runForward(t, opts)
+	events := runForward(t, opts)
 
-	if e := next(t, events); e.Event != "active" || e.Name != "direct" {
-		t.Fatalf("event = %+v", e)
+	if e := waitFor(t, events, kind("active")); e.Name != "direct" {
+		t.Fatalf("active = %+v", e)
 	}
 	roundTrip(t, "tcp", opts.StartPort)
 	roundTrip(t, "udp", opts.StartPort)
 }
 
-// A dead link fails the probe through it; the direct connection passes and stays.
-func TestForwardFallsBackToDirect(t *testing.T) {
-	srv := health(http.StatusNoContent)
-	defer srv.Close()
-	opts := forwardOptions(t, namedLink("dead"), DirectLink)
-	opts.ProbeURL = srv.URL
-	events, _ := runForward(t, opts)
-
-	for _, w := range []Event{{Event: "active", Name: "dead"}, {Event: "failed", Name: "dead"}, {Event: "active", Name: "direct"}} {
-		if e := next(t, events); e.Event != w.Event || e.Name != w.Name {
-			t.Fatalf("event = %+v, want %+v", e, w)
-		}
+// fakeResolver answers DNS questions on a local UDP port with the same ID.
+func fakeResolver(t *testing.T) netip.AddrPort {
+	t.Helper()
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
 	}
-	select {
-	case e := <-events:
-		t.Fatalf("the working direct connection was replaced: %+v", e)
-	case <-time.After(500 * time.Millisecond):
+	t.Cleanup(func() { pc.Close() })
+	go func() {
+		buf := make([]byte, 512)
+		for {
+			n, addr, err := pc.ReadFrom(buf)
+			if err != nil {
+				return
+			}
+			if n >= 12 {
+				answer := append([]byte{}, buf[:n]...)
+				answer[2] |= 0x80
+				_, _ = pc.WriteTo(answer, addr)
+			}
+		}
+	}()
+	return netip.MustParseAddrPort(pc.LocalAddr().String())
+}
+
+// The real check: a DNS question over UDP through a SOCKS proxy of xray.
+func TestDNSCheckThroughALink(t *testing.T) {
+	port := freePortBase(t)
+	res, err := Start(context.Background(), Options{Links: []string{DirectLink}, StartPort: port, ReadyTimeout: 5 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Close()
+	socks := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+
+	saved := checkResolvers
+	t.Cleanup(func() { checkResolvers = saved })
+
+	// One resolver that never answers and one that does: one answer is enough.
+	closed, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	silent := netip.MustParseAddrPort(closed.LocalAddr().String())
+	closed.Close()
+	checkResolvers = []netip.AddrPort{silent, fakeResolver(t)}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := dnsCheck(ctx, socks); err != nil {
+		t.Fatalf("dnsCheck with an answering resolver: %v", err)
+	}
+
+	checkResolvers = []netip.AddrPort{silent}
+	ctx, cancel = context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	if err := dnsCheck(ctx, socks); err == nil {
+		t.Fatal("dnsCheck passed with no resolver answering")
 	}
 }

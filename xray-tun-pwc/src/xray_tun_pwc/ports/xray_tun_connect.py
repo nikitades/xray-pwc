@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import shutil
+import sys
 from asyncio import StreamReader, StreamWriter
 from asyncio.subprocess import PIPE, Process
 from collections.abc import AsyncGenerator, Sequence
@@ -20,6 +21,7 @@ from xray_tun_pwc.app import (
     XrayTunConnectUnavailable,
 )
 from xray_tun_pwc.domain.entities import SocksTunnel, TunnelGroup, VpnConfigLine
+from xray_tun_pwc.log import relayed
 
 INSTALL_HINT = (
     "Install xray-tun-connect: run `make install` (go install) in the xray-tun-connect source "
@@ -102,17 +104,26 @@ class TunnelReport:
         return SocksTunnel.broken(config, entry["port"], entry.get("error", ""), protocol)
 
 
+async def relay_log(stderr: StreamReader) -> None:
+    """Passes xray-tun-connect's log lines on to ours, marked as its own."""
+    async for raw in stderr:
+        print(relayed("xtc", raw.decode(errors="replace")), file=sys.stderr, flush=True)
+
+
 @frozen
 class TunnelProcess:
     process: Process
     stdin: StreamWriter
     stdout: StreamReader
+    log_relay: asyncio.Task[None]
 
     @classmethod
     def of(cls, process: Process) -> TunnelProcess:
-        if process.stdin is None or process.stdout is None:
-            raise XrayTunConnectFailed("xray-tun-connect was started without stdin/stdout pipes")
-        return cls(process, process.stdin, process.stdout)
+        if process.stdin is None or process.stdout is None or process.stderr is None:
+            raise XrayTunConnectFailed("xray-tun-connect was started without its pipes")
+        return cls(
+            process, process.stdin, process.stdout, asyncio.create_task(relay_log(process.stderr))
+        )
 
     async def send_links(self, command: TunnelCommand) -> None:
         self.stdin.write(command.stdin_links())
@@ -142,6 +153,10 @@ class TunnelProcess:
         except TimeoutError:
             self.process.kill()
             await self.process.wait()
+        try:
+            await asyncio.wait_for(self.log_relay, SHUTDOWN_GRACE_SECONDS)
+        except TimeoutError:
+            self.log_relay.cancel()
 
 
 @frozen
@@ -180,7 +195,9 @@ class XrayTunConnectCli(XrayTunConnect):
         if not configs:
             raise ValueError("no configs to start tunnels for")
         command = TunnelCommand(tuple(configs), options)
-        tunnels = TunnelProcess.of(await self.spawn(*command.arguments(), stdin=PIPE, stdout=PIPE))
+        tunnels = TunnelProcess.of(
+            await self.spawn(*command.arguments(), stdin=PIPE, stdout=PIPE, stderr=PIPE)
+        )
         try:
             await tunnels.send_links(command)
             yield await tunnels.read_report(configs, options)

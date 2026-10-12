@@ -1,0 +1,7 @@
+#!/bin/bash
+# aio-run <service> <command...>: runs the command with its output, stdout and
+# stderr, going through aio-log: time and service in front, into the log file.
+svc=$1
+shift
+exec > >(exec /usr/local/bin/aio-log "$svc") 2>&1
+exec "$@"

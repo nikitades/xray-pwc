@@ -32,7 +32,7 @@ def test_kwargs_beat_env(monkeypatch, tmp_path):
 
 def test_min_xray_tun_connect_version_is_a_constant(monkeypatch):
     monkeypatch.setenv("PWC_MIN_XRAY_TUN_CONNECT_VERSION", "9.9.9")
-    assert Settings().get_min_xray_tun_connect_version() == Version("0.1.0")
+    assert Settings().get_min_xray_tun_connect_version() == Version("0.5.0")
 
 
 def test_config_lines_override_the_file(tmp_path):
@@ -58,7 +58,9 @@ def test_get_config_missing_file_names_resolved_path(tmp_path):
 async def test_cli_app_refuses_an_old_xray_tun_connect(container: Container, capsys):
     container[XrayTunConnect] = FakeXrayTunConnect(reported_version="0.0.1")
     assert await container[CliApp].run() == 1
-    assert "older than the required 0.1.0" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert err.startswith("ERROR xtc_unavailable ")
+    assert "older than the required 0.5.0" in err
 
 
 async def test_cli_app_prints_one_line_per_tunnel(container: Container, settings: Settings, capsys):
@@ -70,9 +72,9 @@ async def test_cli_app_prints_one_line_per_tunnel(container: Container, settings
 
     await app.run_once(settings.get_config())
 
-    assert capsys.readouterr().out.splitlines() == [
-        "msk - partial[instagram.com: ERR_TIMED_OUT]",
-        "spb - failed[tunnel: unsupported share format]",
+    assert capsys.readouterr().err.splitlines() == [
+        'WARN check index=0 name=msk result=partial stage=2 failed="instagram.com: ERR_TIMED_OUT"',
+        'ERROR check index=1 name=spb result=link_broken stage=0 failed="tunnel: unsupported share format"',
     ]
 
 
@@ -88,10 +90,13 @@ async def test_cli_app_introduces_itself_then_checks_until_stopped(container: Co
 
     assert await running == 0
     assert metrics.serving
-    intro, *results = capsys.readouterr().out.splitlines()
-    assert intro.startswith("xray-tun-pwc ")
-    assert "| 2 tunnels | every PT5M + up to PT2M" in intro
-    assert results == ["msk - OK", "spb - OK"]
+    intro, *results = capsys.readouterr().err.splitlines()
+    assert intro.startswith("INFO start version=")
+    assert intro.endswith(" links=2 interval=PT5M jitter=PT2M")
+    assert results == [
+        "INFO check index=0 name=msk result=ok stage=3",
+        "INFO check index=1 name=spb result=ok stage=3",
+    ]
 
 
 def test_intervals_are_read_as_iso_8601(monkeypatch):

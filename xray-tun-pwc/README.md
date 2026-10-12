@@ -90,15 +90,23 @@ A check answers one question: did the pages load through the tunnel.
 
 ## Output
 
-On start it prints one line about itself, then one line per link after every
-check:
+It logs to stderr in the format every VpnChecker service shares:
+`LEVEL event key=value ...`, values with spaces in quotes. On a probe, the
+time and the service name are put in front. One line on start, then one per
+link after every check, with `result` and `stage` as in the metrics:
 
 ```
-xray-tun-pwc 0.1.0 | instance probe-1 | 3 tunnels | every PT5M + up to PT2M
-msk-reality - OK
-spb-ws - partial[instagram.com: HTTP 429, thesun.co.uk: ERR_CONNECTION_RESET]
-backup - failed[tunnel: unsupported share format]
+INFO start version=0.2.0 instance=probe-1 links=3 interval=PT5M jitter=PT2M
+INFO check index=0 name=msk-reality result=ok stage=3
+WARN check index=1 name=spb-ws result=partial stage=2 failed="instagram.com: HTTP 429, thesun.co.uk: ERR_CONNECTION_RESET"
+ERROR check index=2 name=backup result=link_broken stage=0 failed="tunnel: unsupported share format"
 ```
+
+`result` is `ok` (INFO), `partial` (WARN), `unreachable` or `link_broken`
+(ERROR). The lines of xray-tun-connect, which the checker starts, come
+through with `xtc.` in front of their event, for example
+`WARN xtc.link_rejected index=2 name=backup reason="..."`; a line not in this
+format becomes `WARN xtc.output msg="..."`.
 
 Every error is logged by its own name, never grouped with similar ones:
 
@@ -236,8 +244,10 @@ docker run --rm --shm-size 512m \
 `--shm-size` gives Chromium more shared memory. Docker's default is 64 MB,
 and Chromium can run out of it on big pages.
 
-On real probes, use the Ansible playbook `probes.yml`. See
-[`../ansible/README.md`](../ansible/README.md).
+On real probes the checker runs inside the `xray-pwc-aio` container
+([`../xray-pwc-aio/README.md`](../xray-pwc-aio/README.md)), deployed by
+the Ansible playbook `probes.yml` ([`../ansible/README.md`](../ansible/README.md)).
+This Dockerfile is for trying it on your own machine.
 
 ## Development
 

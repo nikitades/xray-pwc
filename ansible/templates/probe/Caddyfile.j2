@@ -2,9 +2,15 @@
 {
 	admin off
 	auto_https off
+	log {
+		level WARN
+	}
+	servers {
+		protocols h1
+	}
 }
 
-:8080 {
+http://127.0.0.1:8080 {
 	reverse_proxy {{ prom_remote_write_upstream }} {
 		header_up Host {upstream_hostport}
 		transport http {

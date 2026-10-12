@@ -1,0 +1,74 @@
+---
+# The probe's host, not its container: puts compose.yml into ~/xray-pwc-aio
+# (probe_host_dir) and brings the container up with the image of this
+# repository. For a new probe, instead of copying compose.yml by hand, and to
+# move a probe to a new image (xray-pwc-aio/VERSION). Needs SSH to the host:
+# probe_host, probe_host_user and probe_host_port in the inventory. Docker with
+# the compose plugin must be there.
+#   ansible-playbook probes-host.yml --limit <probe>
+- name: Probe hosts (xray-pwc-aio container)
+  hosts: probes
+  gather_facts: false
+  vars:
+    ansible_host: "{{ probe_host }}"
+    ansible_user: "{{ probe_host_user | default(omit) }}"
+    ansible_port: "{{ probe_host_port | default(22) }}"
+    ansible_ssh_common_args: ""
+    ansible_python_interpreter: auto_silent
+
+  pre_tasks:
+    - name: Check the host is known
+      ansible.builtin.assert:
+        that: probe_host is defined
+        fail_msg: >-
+          no probe_host for {{ inventory_hostname }} in the inventory. Without SSH to the
+          host, copy files/vpnc-net/join/{{ inventory_hostname }}/compose.yml there by hand
+          and run docker compose up -d in its folder.
+        quiet: true
+
+  tasks:
+    # become changes the home, so the folder gets an absolute path first.
+    - name: Find the folder
+      ansible.builtin.command: printenv HOME
+      register: probe_home
+      changed_when: false
+      check_mode: false
+
+    - name: Pick the folder
+      ansible.builtin.set_fact:
+        probe_folder: "{{ probe_host_dir if probe_host_dir is abs else probe_home.stdout ~ '/' ~ probe_host_dir }}"
+
+    - name: Create the folder
+      ansible.builtin.file:
+        path: "{{ probe_folder }}"
+        state: directory
+        mode: "0700"
+
+    # With the join token: ignored by a container that already has its state.
+    - name: Template compose file
+      ansible.builtin.template:
+        src: templates/probe/compose.yml.j2
+        dest: "{{ probe_folder }}/compose.yml"
+        mode: "0600"
+      no_log: true
+      register: probe_compose
+
+    - name: Bring up the container
+      ansible.builtin.command: docker compose up -d --pull missing --remove-orphans
+      args:
+        chdir: "{{ probe_folder }}"
+      become: true
+      register: probe_up
+      changed_when: probe_up.stderr is search('Started|Recreated|Created|Pulled')
+      when: not ansible_check_mode
+
+    - name: Remove old images
+      ansible.builtin.shell: >-
+        docker image ls --format '{% raw %}{{.Repository}}:{{.Tag}}{% endraw %}'
+        | grep -E '^ghcr.io/nikitades/xray-pwc-aio:'
+        | grep -vxF '{{ aio_image }}'
+        | xargs -r docker image rm
+      become: true
+      register: probe_old_images
+      changed_when: probe_old_images.stdout | length > 0
+      when: not ansible_check_mode

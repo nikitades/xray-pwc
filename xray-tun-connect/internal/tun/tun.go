@@ -29,9 +29,8 @@ type Options struct {
 	// Forward, when set, makes every inbound send everything it gets to this
 	// one address through its link, instead of being a SOCKS proxy.
 	Forward *Target
-	// CheckPort, when set, adds a SOCKS inbound on 127.0.0.1 for the first
-	// link, for Forward's health probe through the link.
-	CheckPort int
+	// Ports, when it has one port per link, replaces StartPort+i.
+	Ports []int
 }
 
 // Target is a host and port at the far end of a forward.
@@ -108,7 +107,11 @@ func Start(ctx context.Context, opts Options) (*Result, error) {
 	tunnels := make([]Tunnel, len(opts.Links))
 	outbounds := make([]json.RawMessage, len(opts.Links))
 	for i, link := range opts.Links {
-		t := Tunnel{Index: i, Port: opts.StartPort + i, Name: linkName(link)}
+		port := opts.StartPort + i
+		if len(opts.Ports) == len(opts.Links) {
+			port = opts.Ports[i]
+		}
+		t := Tunnel{Index: i, Port: port, Name: linkName(link)}
 		ob, proto, err := parseLink(link)
 		if err != nil {
 			t.Error = err.Error()

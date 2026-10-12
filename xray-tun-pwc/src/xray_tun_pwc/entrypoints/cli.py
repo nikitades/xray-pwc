@@ -1,7 +1,6 @@
 import asyncio
 import signal
 import socket
-import sys
 from datetime import timedelta
 from importlib.metadata import version as installed_version
 from pathlib import Path
@@ -21,6 +20,7 @@ from xray_tun_pwc.app.xray_tun_connect_version import (
 from xray_tun_pwc.domain.entities import TunnelCheck, VpnConfigLine
 from xray_tun_pwc.domain.schedule import CheckSchedule
 from xray_tun_pwc.domain.sites import SiteCatalog
+from xray_tun_pwc.log import ERROR, INFO, log
 
 
 class Settings(BaseSettings):
@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     xray_tun_connect_bin: Path | None = None
 
     def get_min_xray_tun_connect_version(self) -> Version:
-        return Version("0.1.0")
+        return Version("0.5.0")
 
     def get_site_catalog(self) -> SiteCatalog:
         return SiteCatalog.from_urls(
@@ -87,12 +87,12 @@ class CliApp:
                 CheckXrayTunConnectVersionRequest(self.settings.get_min_xray_tun_connect_version())
             )
         except (XrayTunConnectUnavailable, XrayTunConnectTooOld) as e:
-            print(f"xray-tun-pwc: {e}", file=sys.stderr)
+            log(ERROR, "xtc_unavailable", err=e)
             return 1
 
         configs = self.settings.get_config()
         self.metrics_server.start_serving()
-        print(self.introduction(configs), flush=True)
+        log(INFO, "start", **self.introduction(configs))
 
         loop = asyncio.get_running_loop()
         for stop_signal in (signal.SIGTERM, signal.SIGINT):
@@ -109,17 +109,18 @@ class CliApp:
     async def run_once(self, configs: tuple[VpnConfigLine, ...]) -> tuple[TunnelCheck, ...]:
         checks = await self.check_configs.handle(CheckRequest(configs))
         self.metrics.record(checks)
-        for check in checks:
-            print(check.summary(), flush=True)
+        for index, check in enumerate(checks):
+            log(check.log_level, "check", index=index, **check.log_fields())
         return checks
 
-    def introduction(self, configs: tuple[VpnConfigLine, ...]) -> str:
-        return (
-            f"xray-tun-pwc {installed_version('xray-tun-pwc')}"
-            f" | instance {self.settings.instance}"
-            f" | {len(configs)} tunnels"
-            f" | {self.schedule}"
-        )
+    def introduction(self, configs: tuple[VpnConfigLine, ...]) -> dict[str, str | int]:
+        return {
+            "version": installed_version("xray-tun-pwc"),
+            "instance": self.settings.instance,
+            "links": len(configs),
+            "interval": self.schedule.interval_iso(),
+            "jitter": self.schedule.jitter_iso(),
+        }
 
     def stop(self) -> None:
         self.stopped.set()

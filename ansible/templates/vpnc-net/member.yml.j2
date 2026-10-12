@@ -3,7 +3,3 @@
 vpnc_net_ip: {{ join_ip }}
 vpnc_net_private_key: "{{ join_keys.stdout_lines[0] }}"
 vpnc_net_public_key: "{{ join_keys.stdout_lines[1] }}"
-{% if join_group == 'vpnc_net_peers' %}
-# Reaches every other member, for example SSH to the probes.
-vpnc_net_admin: true
-{% endif %}

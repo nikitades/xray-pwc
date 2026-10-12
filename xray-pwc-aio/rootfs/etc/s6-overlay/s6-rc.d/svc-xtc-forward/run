@@ -1,0 +1,2 @@
+#!/bin/bash
+exec /usr/local/bin/aio-run xtc-forward /usr/local/lib/aio/xtc-forward

@@ -1,6 +1,6 @@
 [project]
 name = "xray-tun-pwc"
-version = "0.1.0"
+version = "0.2.0"
 description = "Checks Xray VPN links with realistic browser traffic and exports Prometheus metrics"
 readme = "README.md"
 authors = [

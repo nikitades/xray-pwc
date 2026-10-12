@@ -1,0 +1,12 @@
+#!/bin/bash
+# Carries vpnc-net through the service links: WireGuard's endpoint is
+# 127.0.0.1:$AIO_VIA_PORT, and xray-tun-connect forwards it to the server
+# through the first usable link. Without links, WireGuard goes straight.
+. /usr/local/lib/aio/common.sh
+links=$STATE/service_links.txt
+has_links "$links" || idle "no service links: vpnc-net goes straight to the server" 86400
+bin=$(release_bin xray-tun-connect)
+[[ -n $bin ]] || idle "no xray-tun-connect"
+# From a file, not a pipe: on a pipe xray-tun-connect stops at end of input.
+exec "$bin" -stdin-links -forward "$AIO_FORWARD" -listen 127.0.0.1 -start-port "$AIO_VIA_PORT" \
+	-xray-log-level none <"$links"

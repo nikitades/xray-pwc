@@ -1,0 +1,38 @@
+---
+# One package (package.file from aio_package_dir) unpacked into package.dest in
+# the container, unless it is there already. Unpacked next to the target and
+# moved in place, so a broken copy never looks like a package.
+- name: Find {{ package.dest }}
+  ansible.builtin.stat:
+    path: "{{ package.dest }}"
+  register: aio_package
+
+- name: Unpack {{ package.dest }}
+  when: not aio_package.stat.exists
+  block:
+    - name: Create {{ package.dest | dirname }}
+      ansible.builtin.file:
+        path: "{{ package.dest | dirname }}"
+        state: directory
+        mode: "0755"
+
+    - name: Copy {{ package.file }}
+      ansible.builtin.copy:
+        src: "{{ aio_package_dir }}/{{ package.file }}"
+        dest: /app/{{ package.file }}
+        mode: "0600"
+
+    - name: Unpack {{ package.file }}
+      ansible.builtin.shell: |
+        set -eu
+        rm -rf "{{ package.dest }}.new"
+        mkdir -p "{{ package.dest }}.new"
+        tar --zstd -xf "/app/{{ package.file }}" -C "{{ package.dest }}.new"
+        mv -T "{{ package.dest }}.new" "{{ package.dest }}"
+      changed_when: true
+
+  always:
+    - name: Remove {{ package.file }}
+      ansible.builtin.file:
+        path: /app/{{ package.file }}
+        state: absent

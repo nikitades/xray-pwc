@@ -1,0 +1,2 @@
+#!/bin/bash
+exec /usr/local/bin/aio-run relay /usr/local/lib/aio/relay

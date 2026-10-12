@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net"
 	"runtime"
 	"strings"
 
@@ -12,17 +13,6 @@ import (
 
 func inboundTag(i int) string  { return fmt.Sprintf("in_%d", i) }
 func outboundTag(i int) string { return fmt.Sprintf("out_%d", i) }
-
-const checkTag = "check"
-
-func firstOK(tunnels []Tunnel) int {
-	for i, t := range tunnels {
-		if t.OK {
-			return i
-		}
-	}
-	return -1
-}
 
 // buildConfig assembles one xray config: an inbound per live tunnel on
 // listen:port, its outbound, and a routing rule pinning the two together.
@@ -38,7 +28,7 @@ func buildConfig(tunnels []Tunnel, outbounds []json.RawMessage, opts Options) ([
 			"listen":   opts.Listen,
 			"port":     t.Port,
 			"protocol": "socks",
-			"settings": map[string]any{"auth": "noauth", "udp": true},
+			"settings": socksSettings(opts.Listen),
 			// Sniff for routing only, never rewrite the destination.
 			"sniffing": map[string]any{"enabled": true, "destOverride": []string{"http", "tls", "quic"}, "routeOnly": true},
 		}
@@ -48,20 +38,6 @@ func buildConfig(tunnels []Tunnel, outbounds []json.RawMessage, opts Options) ([
 			delete(in, "sniffing")
 		}
 		inbounds = append(inbounds, in)
-		if opts.CheckPort != 0 && i == firstOK(tunnels) {
-			inbounds = append(inbounds, map[string]any{
-				"tag":      checkTag,
-				"listen":   "127.0.0.1",
-				"port":     opts.CheckPort,
-				"protocol": "socks",
-				"settings": map[string]any{"auth": "noauth"},
-			})
-			rules = append(rules, map[string]any{
-				"type":        "field",
-				"inboundTag":  []string{checkTag},
-				"outboundTag": outboundTag(i),
-			})
-		}
 		var ob map[string]any
 		if err := json.Unmarshal(outbounds[i], &ob); err != nil {
 			return nil, fmt.Errorf("outbound %d: %w", i, err)
@@ -82,6 +58,16 @@ func buildConfig(tunnels []Tunnel, outbounds []json.RawMessage, opts Options) ([
 		"routing":   map[string]any{"domainStrategy": "AsIs", "rules": rules},
 	}
 	return json.Marshal(cfg)
+}
+
+// socksSettings turns UDP on. The UDP relay address the inbound hands out is
+// the bind address, unless that is a wildcard.
+func socksSettings(listen string) map[string]any {
+	s := map[string]any{"auth": "noauth", "udp": true}
+	if ip := net.ParseIP(listen); ip != nil && !ip.IsUnspecified() {
+		s["ip"] = listen
+	}
+	return s
 }
 
 // logConfig keeps xray-core's own output off stdout, which is reserved for

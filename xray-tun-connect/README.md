@@ -5,15 +5,14 @@ Turns a list of Xray share links into local tunnels, in one of two modes:
 - **All at once** (default): every link is a SOCKS5 proxy on its own port.
   The checker uses this mode.
 - **Forward** (`-forward host:port`): one port forwards TCP and UDP to one
-  address, through one link at a time, and last through no VPN at all. With
-  more than one candidate it checks the connection and moves the port to the
-  next one when it fails.
+  address, through one link at a time. Every link is checked in the
+  background; the port stays on a usable link and moves to the first usable
+  one when it goes bad. A connection without a VPN is the last resort.
 
 Built for programmatic use: a parent process starts it, reads the JSON
 report, uses the ports, and exits — the tunnels go down with it.
 
-Internally, links are parsed by libXray and served by one in-process
-xray-core instance.
+Internally, links are parsed by libXray and served by in-process xray-core.
 
 ## Usage
 
@@ -21,8 +20,7 @@ xray-core instance.
 xray-tun-connect -link <share-link> [-link ...]
 xray-tun-connect -links "<link1>,<link2>"        # commas or newlines; # starts a comment
 printf '%s\n\n' "$LINKS" | xray-tun-connect -stdin-links   # links stay out of `ps`
-xray-tun-connect -forward vpn.example.com:51973 -start-port 51974 -links "<link1>,<link2>" \
-  -health-url http://10.213.97.1:9090/-/healthy
+xray-tun-connect -forward vpn.example.com:51973 -start-port 51974 -stdin-links < links.txt
 xray-tun-connect -version
 ```
 
@@ -34,12 +32,11 @@ xray-tun-connect -version
 | `-start-port` | `10000` | link *i* listens on `start-port + i`; in forward mode, the one port |
 | `-listen` | `127.0.0.1` | bind address |
 | `-forward` | | `host:port`: forward mode, see below |
-| `-health-url` | | forward mode: URL to check, fetched directly from this machine; unset, `https://www.gstatic.com/generate_204` through the link |
-| `-health-interval` | `15s` | forward mode: time between checks |
-| `-health-timeout` | `5s` | forward mode: timeout of one check |
-| `-health-fails` | `3` | forward mode: failed checks in a row before the next link takes the port |
-| `-disable-direct` | | forward mode: no direct connection after the last link |
-| `-xray-log-level` | `warning` | xray-core log level, written to stderr |
+| `-check-interval` | `15s` | forward mode: time between checks of every link |
+| `-check-timeout` | `5s` | forward mode: timeout of one check |
+| `-check-fails` | `3` | forward mode: failed checks in a row that make a link unusable |
+| `-disable-direct` | | forward mode: no connection without a VPN as the last resort |
+| `-xray-log-level` | `warning` | xray-core's own log level, written to stderr as is |
 | `-ready-timeout` | `10s` | wait for inbounds to start listening |
 | `-version` | | print semver and exit |
 
@@ -51,42 +48,33 @@ to that one address. The far end sees the connection come from the VPN
 server. The link's protocol must support UDP for UDP traffic, as VLESS,
 VMess, Trojan and Shadowsocks do, and the server must allow it.
 
-The links take the port one at a time, in order. After the last link comes
-`direct`: a connection from this machine without any VPN, for the day every
-link is down but the target is reachable anyway. `-disable-direct` drops it.
-It shows in the report and the events as the last entry, named `direct`.
-
-- **One candidate** (one link with `-disable-direct`): it just serves,
-  nothing is checked.
-- **Several:** every `-health-interval` a check runs. After
-  `-health-fails` failures in a row, the next link takes the port, and after
-  the last one, the first again. A link that does not start is skipped.
-- **The check.** With `-health-url`, a plain GET from this machine; any
-  status below 400 passes. Point it at something you can reach only through
-  the forward, and it checks the whole way. On the probes this is Prometheus
-  on the vpnc-net address: the request goes into WireGuard, through the
-  forward and the link, and back. Without `-health-url`, a GET of
-  `https://www.gstatic.com/generate_204` goes through the link itself: it
-  proves the link carries a connection, not that the target answers.
+- **The check.** Every `-check-interval`, every link at once gets a DNS
+  question over UDP, through the link, to 1.1.1.1 and 8.8.8.8; one answer is
+  enough. It proves that the link carries UDP. It does not prove that the VPN
+  server reaches the forward target, and it does not depend on anything at the
+  target: a target that is down does not move the port.
+- **The usable list.** A link that answers is usable. `-check-fails` failures
+  in a row make it unusable, and it comes back with its next answer. Links
+  that do not parse are rejected at the start and never become usable.
+- **Which link serves.** The port stays on its link while that link is
+  usable, even when an earlier one comes back. When it stops being usable,
+  the port moves to the first usable link in the order given: the order is
+  the priority.
+- **`direct`.** The connection without a VPN is never checked: it is the
+  last resort, used only while no link is usable, and the port leaves it as
+  soon as one is. `-disable-direct` drops it; then, with no usable link, the
+  port is closed and `no_tunnels` is logged every minute until a link comes
+  back.
 - **The port stays.** On a switch the port is gone only while the next link
-  starts, under a second. The program using it sees a short gap and goes on.
-
-After the report, forward mode prints one JSON line per switch. `index` is
-the link's position in the report:
-
-```json
-{"event":"active","index":0,"name":"MSK"}
-{"event":"failed","index":0,"name":"MSK","reason":"health check failed 3 times in a row, last: ... timeout"}
-{"event":"active","index":1,"name":"AMS"}
-```
+  starts, under a second. A program using it sees a short gap and goes on.
 
 ## Output contract
 
-One JSON report line on stdout (in forward mode, followed by the switch
-lines above), everything else on stderr:
+**The default mode** prints one JSON report line on stdout, for the program
+that started it:
 
 ```json
-{"version":"0.1.0","listen":"127.0.0.1","tunnels":[
+{"version":"0.5.0","listen":"127.0.0.1","tunnels":[
   {"index":0,"port":10000,"name":"MSK","protocol":"vless","ok":true},
   {"index":1,"port":10001,"ok":false,"error":"unsupported share format"},
   {"index":2,"port":10002,"name":"TRJ","protocol":"trojan","ok":true}
@@ -94,20 +82,49 @@ lines above), everything else on stderr:
 ```
 
 A link that fails to parse or that xray-core rejects **keeps its index and
-port** with `ok:false` — the port map never shifts because of one bad line.
+port** with `ok:false`: the port map never shifts because of one bad line.
+
+**The log**, on stderr in both modes, is one line per event, in the format
+every VpnChecker service shares: `LEVEL event key=value ...`, values with
+spaces in quotes. Whatever collects it puts the time and the service in
+front. Links appear by name only.
+
+```
+INFO start version=0.5.0 listen=127.0.0.1 port=51974 forward=vpn.example.com:51973 links=2 direct=true
+WARN link_rejected index=2 name=old reason="unsupported share format"
+INFO link_usable index=0 name=MSK
+INFO active index=0 name=MSK
+WARN link_unusable index=0 name=MSK fails=3 reason="dns timeout"
+WARN switch from=MSK to=AMS reason=unusable
+INFO switch from=direct to=MSK reason=link_recovered
+ERROR no_tunnels usable=0 direct=false
+```
+
+| event | level | when |
+|---|---|---|
+| `start` | INFO | at start: what runs |
+| `link_rejected` | WARN | a link does not parse or xray-core rejects it |
+| `link_usable` / `link_unusable` | INFO / WARN | forward: a link enters or leaves the usable list |
+| `active` | INFO | forward: the first link on the port |
+| `switch` | WARN, INFO from direct | forward: the port moves to another link |
+| `link_failed` | WARN | forward: the chosen link did not start on the port |
+| `no_tunnels` | ERROR | no usable link (forward: and no direct), every minute |
+| `usage`, `start_failed`, `forward_failed` | ERROR | the process exits |
+
+xray-core's own lines, at `-xray-log-level`, go to stderr as they are.
 
 Lifecycle: after the report the process serves until SIGINT/SIGTERM. When stdin
 is a pipe, EOF on it also shuts the process down, so a parent that dies takes
-the tunnels with it. Run it with `stdin=PIPE` and keep the pipe open.
+the tunnels with it. Run it with `stdin=PIPE` and keep the pipe open; for a
+long-running forward, give the links as a file on stdin, not a pipe.
 
 With `-stdin-links` the same pipe carries the links first: write them one per
 line, then an empty line, then keep the pipe open. Command-line arguments are
 visible to every user via `ps`; stdin is not.
 
-Under systemd, stderr is a journald socket, and xray-core cannot open it for
-its log: start fails with `open /dev/stderr: no such device or address`. Use
-`-xray-log-level none` there; xray-tun-connect's own errors still go to
-stderr.
+Where stderr is a journald socket (systemd), xray-core cannot open it for its
+log: start fails with `open /dev/stderr: no such device or address`. Use
+`-xray-log-level none` there.
 
 Exit codes: `0` clean shutdown, `1` core failed to start or no link was usable
 (the report is still printed), `2` usage error.

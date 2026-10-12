@@ -1,5 +1,10 @@
 // {{ ansible_managed }}
 
+// Its startup lines are info: only what needs attention goes to the log.
+logging {
+  level = "warn"
+}
+
 prometheus.exporter.unix "node" {
   procfs_path = "/host/proc"
   sysfs_path  = "/host/sys"
@@ -28,10 +33,11 @@ prometheus.scrape "node" {
   scrape_interval = "30s"
 }
 
-// honor_labels: keep the instance label set by xray-tun-pwc, not the target address.
+// honor_labels: keep the instance label set by xray-tun-pwc (the probe's name), not
+// the target address.
 prometheus.scrape "xray_tun_pwc" {
   targets = [
-    {"__address__" = "xray-tun-pwc:8000"},
+    {"__address__" = "127.0.0.1:8000"},
   ]
   forward_to      = [prometheus.remote_write.central.receiver]
   job_name        = "xray-tun-pwc"
@@ -45,7 +51,7 @@ prometheus.remote_write "central" {
   }
 
   endpoint {
-    url = "{{ 'http://relay:8080' if probe_relay else prom_remote_write_upstream }}/api/v1/write"
+    url = "{{ 'http://127.0.0.1:8080' if probe_relay else prom_remote_write_upstream }}/api/v1/write"
 
     queue_config {
       max_samples_per_send = {{ prom_remote_write_max_samples }}
