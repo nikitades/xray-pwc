@@ -1,23 +1,40 @@
 # VpnChecker
 
-VpnChecker shows whether your VPN links really work for people in a given
+VpnChecker shows whether your VPN configs (aka links) really work for people in a given
 network, for example a home internet provider in one city. You put a small
 machine, a *probe*, into that network. Every few minutes the probe opens real
-websites through each of your links, the way a person would, and records how
+websites through each of your VPN configs, the way a person would, and records how
 far it got: everything opened, some sites opened, or nothing got through.
 
 All probes send their results to one central server, which stores them and
 draws them in Grafana. Probes need no public address and no open ports: each
 one connects to the server by itself through a small private WireGuard
-network, vpnc-net. The same network lets you reach the probes over SSH, from
+network, vpnc-net.
+
+Remarkably, the Wireguard network is wrapped into the XRay tunnel! This means,
+in environments where providers impose heavy DPI, technologies such as Wireguard and
+at times even AmneziaWG don't work. But that's no issue here! XRay takes care of that.
+
+A simple schema:
+
+`probe <-> XRay tunnel <-> Wireguard <-> metrics collector`
+
+The same network lets you reach the probes over SSH, from
 the control plane machine (the one you run Ansible on) through the central
 server. Where the provider blocks that connection, a probe carries it
 through one of your VPN links instead.
 
+To make it clear, there are two lists of VPN configs:
+
+- the list of configs to check
+- the list of configs to use as a secure XRay tunnel
+
+and these lists don't have to be the same. But they might.
+
 A probe is one Docker container, so any machine with Docker can be one,
 Linux or macOS. Everything is installed with Ansible from your own machine,
 and what goes into the probes is built there too. The project is young: treat
-the defaults as a starting point, not as tuned values.
+the defaults as a starting point, not as tuned values. No root needed!
 
 ## Which part you need
 
