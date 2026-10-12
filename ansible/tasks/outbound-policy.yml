@@ -1,0 +1,16 @@
+---
+# Checks a probe's outbound_access_policy (group_vars/probes.yml) before anything
+# is written with it.
+- name: Check outbound access policy
+  ansible.builtin.assert:
+    that:
+      - probe_relay is not defined
+      - outbound_access_policy in outbound_access_policies
+      - outbound_access_policy != 'vpn' or vpnc_net_via_lines | length > 0
+    fail_msg: >-
+      {{ 'probe_relay is gone: set outbound_access_policy: relay (or plain) for ' ~ inventory_hostname ~ ' instead'
+         if probe_relay is defined else
+         'outbound_access_policy: ' ~ outbound_access_policy ~ ' for ' ~ inventory_hostname ~ ' needs links in files/probes/' ~ inventory_hostname ~ '/service_links.txt'
+         if outbound_access_policy == 'vpn' else
+         'outbound_access_policy of ' ~ inventory_hostname ~ ' is ' ~ outbound_access_policy ~ ', must be one of ' ~ outbound_access_policies | join(', ') }}
+    quiet: true

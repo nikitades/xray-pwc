@@ -1,6 +1,7 @@
 ---
 # Takes a probe's container away on its host, with its state, log, volume and
-# image, and the folder of compose.yml. Nothing else on the host was touched by
+# image, and the folder of compose.yml: where the container runs, else
+# ~/xray-pwc-aio (probe_host_dir). Nothing else on the host was touched by
 # this project. Needs SSH to the host, like probes-host.yml. Then forget the
 # member: ansible-playbook vpnc-net-remove.yml -e name=<probe>
 #   ansible-playbook probes-clean.yml --limit <probe>
@@ -24,16 +25,8 @@
         quiet: true
 
   tasks:
-    # become changes the home, so the folder gets an absolute path first.
-    - name: Find the folder
-      ansible.builtin.command: printenv HOME
-      register: probe_home
-      changed_when: false
-      check_mode: false
-
-    - name: Pick the folder
-      ansible.builtin.set_fact:
-        probe_folder: "{{ probe_host_dir if probe_host_dir is abs else probe_home.stdout ~ '/' ~ probe_host_dir }}"
+    - name: Container folder
+      ansible.builtin.import_tasks: tasks/probe-host-folder.yml
 
     - name: Find the compose file
       ansible.builtin.stat:
@@ -47,6 +40,26 @@
       become: true
       changed_when: true
       when: probe_compose.stat.exists and not ansible_check_mode
+
+    # A container whose folder lost its compose.yml would stay running.
+    - name: Check the container is gone
+      ansible.builtin.command: docker inspect xray-pwc-aio
+      become: true
+      register: probe_left
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      when: not ansible_check_mode
+
+    - name: Report a container left running
+      ansible.builtin.assert:
+        that: probe_left.rc != 0
+        fail_msg: >-
+          xray-pwc-aio still exists on the host, and {{ probe_folder }} has no compose.yml
+          for it. Take it down by hand: docker rm -f xray-pwc-aio, then docker volume rm
+          xray-pwc-aio_app and its folder.
+        quiet: true
+      when: not ansible_check_mode
 
     # state/ and logs/ belong to root: the container wrote them.
     - name: Remove the folder

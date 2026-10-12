@@ -6,18 +6,19 @@ way a person would. Then it exports one result per link as Prometheus metrics.
 
 ## What one check does
 
-Every few minutes, for every link:
+Every few minutes, one round:
 
 1. [xray-tun-connect](../xray-tun-connect/) starts a local SOCKS5 tunnel for
-   the link.
-2. Chromium opens **heavy sites** through the tunnel. It picks a random site
-   from the heavy list, `PWC_HEAVY_VISITS` times (3 by default). Heavy pages
-   are big, so they catch connections that freeze after the first few
-   kilobytes.
-3. Chromium opens **every target site** through the tunnel, one after
-   another. These are the sites people actually need.
-4. The tunnel is closed. The next check starts with a fresh tunnel and a fresh
-   browser.
+   every link at once, each on its own port. A link it cannot start is
+   `link_broken` and skipped.
+2. For each link in turn, with a fresh browser, Chromium opens **heavy
+   sites** through its tunnel. It picks a random site from the heavy list,
+   `PWC_HEAVY_VISITS` times (3 by default). Heavy pages are big, so they catch
+   connections that freeze after the first few kilobytes.
+3. Then **every target site**, one after another. These are the sites people
+   actually need.
+4. After the last link the tunnels are closed. The next round starts with
+   fresh tunnels.
 
 Every page gets up to three tries. The wait between tries doubles: 2 s, then
 4 s.
@@ -35,10 +36,10 @@ The result is the furthest stage the check reached:
 
 | stage | `pwc_tunnel_stage` | result | meaning |
 |---|---|---|---|
-| link broken | `0` | `failed` | the tunnel could not start from this link |
-| unreachable | `1` | `failed` | nothing proves that traffic got through |
+| link broken | `0` | `link_broken` | the tunnel could not start from this link |
+| unreachable | `1` | `unreachable` | nothing proves that traffic got through |
 | partial | `2` | `partial` | traffic got through, but not every page opened |
-| complete | `3` | `OK` | every page opened |
+| complete | `3` | `ok` | every page opened |
 
 A failure is always a full failure. Only a success can be partial.
 
@@ -52,7 +53,7 @@ What proves that traffic got through the tunnel:
 | the SOCKS connection was refused (`ERR_PROXY_CONNECTION_FAILED`) | no |
 | timeout, reset, DNS error, anything unknown | no: could be a dead server or a stalled connection |
 
-So a link where every page only timed out is `failed`, and a link where
+So a link where every page only timed out is `unreachable`, and a link where
 every site answered `429` is `partial`.
 
 ### Why heavy pages
@@ -61,8 +62,8 @@ A check that fetches a tiny page, such as `generate_204`, sends a few hundred
 bytes. Some DPI setups, notably in Russia, let a TCP connection to certain
 foreign networks start normally and then stall it after roughly 16 KB. A tiny
 request passes; a real page does not. We hit exactly this on the probes' own
-metrics traffic. Heavy pages push enough bytes through the tunnel to cross
-that threshold.
+metrics traffic, before it went into the probes' WireGuard tunnel. Heavy pages
+push enough bytes through the tunnel to cross that threshold.
 
 ## What it does not catch
 
@@ -83,8 +84,9 @@ A check answers one question: did the pages load through the tunnel.
   `PWC_HEAVY_VISITS` heavy pages and all target pages, plus whatever the
   browser fetches before `DOMContentLoaded`. On a metered connection, choose
   the number of links, the visits and the interval with that in mind.
-- **Image size.** The image contains Chromium, so it is large. Ansible builds
-  it once on your machine and sends it to probes only when the code changes.
+- **Image size.** The image contains Chromium, so it is large. On probes it
+  is the `xray-pwc-aio` image, pulled once from a registry; Ansible then sends
+  only the code, built on your machine, and only when it changes.
 - **CPU and memory.** One Chromium at a time. Links are checked one after
   another, not in parallel.
 
@@ -96,7 +98,7 @@ time and the service name are put in front. One line on start, then one per
 link after every check, with `result` and `stage` as in the metrics:
 
 ```
-INFO start version=0.2.0 instance=probe-1 links=3 interval=PT5M jitter=PT2M
+INFO start version=0.2.1 instance=probe-1 links=3 interval=PT5M jitter=PT2M
 INFO check index=0 name=msk-reality result=ok stage=3
 WARN check index=1 name=spb-ws result=partial stage=2 failed="instagram.com: HTTP 429, thesun.co.uk: ERR_CONNECTION_RESET"
 ERROR check index=2 name=backup result=link_broken stage=0 failed="tunnel: unsupported share format"
@@ -107,6 +109,15 @@ ERROR check index=2 name=backup result=link_broken stage=0 failed="tunnel: unsup
 through with `xtc.` in front of their event, for example
 `WARN xtc.link_rejected index=2 name=backup reason="..."`; a line not in this
 format becomes `WARN xtc.output msg="..."`.
+
+Two errors are not about a link:
+
+- `ERROR xtc_unavailable` at the start: xray-tun-connect is missing or too
+  old. The checker stops.
+- `ERROR round_failed err="..."`: xray-tun-connect itself failed in a round,
+  for example it printed no report in time or its port was taken. The round
+  is skipped, the metrics keep the last values, and the next round tries
+  again.
 
 Every error is logged by its own name, never grouped with similar ones:
 
@@ -198,8 +209,8 @@ export PWC_TARGET_SITES='["https://www.youtube.com/watch?v=dQw4w9WgXcQ", "https:
 export PWC_HEAVY_VISITS=5
 ```
 
-Without `PWC_XRAY_TUN_CONNECT_BIN`, the binary is looked up in `$GOBIN`,
-then `$GOPATH/bin` (`~/go/bin` by default), then `PATH`. If it is missing or too old, the program stops with an error.
+Without `PWC_XRAY_TUN_CONNECT_BIN`, the binary is looked up in `$GOBIN` if
+it is set, otherwise in `$GOPATH/bin` (`~/go/bin` by default), then in `PATH`. If it is missing or too old, the program stops with an error.
 When it is missing, the error also says how to install it.
 
 ## Run it
@@ -213,10 +224,9 @@ You need [uv](https://docs.astral.sh/uv/), Python 3.14 and the
 make -C ../xray-tun-connect install       # into ~/go/bin
 ```
 
-or take `xray-tun-connect-<os>-<arch>` from the Releases page and point the
-checker at it with `PWC_XRAY_TUN_CONNECT_BIN=<path>`. On macOS, clear the
-quarantine of a downloaded file first: `xattr -d com.apple.quarantine <file>`.
-Then:
+or `make -C ../xray-tun-connect build` and point the checker at
+`../xray-tun-connect/xray-tun-connect` with `PWC_XRAY_TUN_CONNECT_BIN=<path>`.
+There are no prebuilt binaries. Then:
 
 ```bash
 uv sync

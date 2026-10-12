@@ -5,7 +5,7 @@
 
   {{ vpnc_net_join_compose }}
 
-It is private: VPNC_JOIN holds the probe's key. {{ 'The tunnel goes through the service links.' if vpnc_net_via else 'The tunnel goes straight to ' ~ vpnc_net_endpoint ~ ' over UDP; put links into files/probes/' ~ inventory_hostname ~ '/service_links.txt and run this again if the network blocks it.' }}
+It is private: VPNC_JOIN holds the probe's key. {{ 'The tunnel goes through the service links (outbound_access_policy: vpn).' if vpnc_net_via else 'The tunnel goes straight to ' ~ vpnc_net_endpoint ~ ' over UDP (outbound_access_policy: ' ~ outbound_access_policy ~ '). If the network blocks it, set outbound_access_policy: vpn for the probe in the inventory and put links into files/probes/' ~ inventory_hostname ~ '/service_links.txt. Then, with SSH to its host, run probes-host.yml --limit ' ~ inventory_hostname ~ '; without it, run this again and start the new compose.yml there with an empty ./state: the token is read only into an empty one.' }}
 
 1. On the machine (Linux or macOS with Docker), in a folder of its own:
      docker compose up -d

@@ -7,9 +7,9 @@ Grafana, and any number of probes, each one `xray-pwc-aio` container.
 |---|---|---|
 | `monitoring.yml` | `monitoring` | the vpnc-net server (WireGuard) + Prometheus (receives remote write) + Grafana + Caddy + CoreDNS |
 | `probes.yml` | the probe containers | the code (a release), Alloy and Caddy, the links, the tunnel settings, inside each container |
-| `probes-host.yml` | the probes' hosts | puts `compose.yml` on a host and brings the container up, or to a new image |
+| `probes-host.yml` | the probes' hosts | puts `compose.yml` on a host and brings the container up, or to a new image; writes the tunnel's settings, also when the tunnel is down |
 | `probes-clean.yml` | the probes' hosts | takes a container down with its state, log and image |
-| `vpnc-net-join.yml` | your machine + `monitoring` | adds a vpnc-net member: address, keys, inventory entry, link files, `compose.yml` with the join token; tells the server |
+| `vpnc-net-join.yml` | your machine + `monitoring` | adds a vpnc-net member: address, keys, inventory entry, link files, `compose.yml` with the join token; tells the server. For the server itself only the keys |
 | `vpnc-net-remove.yml` | your machine + `monitoring` | forgets a vpnc-net member and tells the server |
 
 Run every command from this directory: `ansible.cfg` here sets the inventory
@@ -26,6 +26,9 @@ ansible-playbook vpnc-net-remove.yml -e name=<probe>  # and forget it
 ```
 
 Add `--check --diff` to any of them to see the changes without making them.
+What needs a real change first is skipped then: building and sending a
+release, starting a container, and everything after the keys of a new
+member.
 
 ## Step by step
 
@@ -42,7 +45,8 @@ Add `--check --diff` to any of them to see the changes without making them.
 - **Probes**: any machine with Docker and the compose plugin, Linux or macOS,
   amd64 or arm64, and outgoing internet. No public address and no open port:
   the container connects out. Where the provider blocks UDP to the server,
-  vpnc-net goes through your VPN links instead, see service links in step 5.
+  vpnc-net goes through your VPN links instead, see the outbound access
+  policy in step 5.
 
 Your machine is not in vpnc-net: it reaches the probes through the server
 (`ssh -J`).
@@ -87,13 +91,16 @@ Then give the server its vpnc-net address and keys:
 ansible-playbook vpnc-net-join.yml -e name=mon-1      # named as in inventory.yml
 ```
 
-The keys land in `host_vars/<name>/vpnc-net.yml`, git-ignored.
+The keys land in `host_vars/<name>/vpnc-net.yml`, git-ignored. That is all
+it does for the server: `monitoring.yml` sets it up in step 6.
 
 ### 5. Add the VPN links
 
 Each probe has a folder named exactly like the probe: `files/probes/<probe>/`.
-`vpnc-net-join.yml` makes it with an empty `links.txt` and `service_links.txt`.
-Put the share links to check into `links.txt`, one per line:
+`vpnc-net-join.yml` makes it in step 7, with an empty `links.txt` and
+`service_links.txt`, and keeps files that are there: make it yourself before
+the join if you want the links in place first. Put the share links to check
+into `links.txt`, one per line:
 
 ```
 # Home ISP, main channel
@@ -110,16 +117,23 @@ list has no links. `files/probes/` is git-ignored.
 Different probes can have different links, or the same ones. The same link
 on several probes is what lets you compare networks.
 
+**How the probe reaches the server.** One setting per probe in the
+inventory, `outbound_access_policy`:
+
+| policy | vpnc-net | Alloy sends | for |
+|---|---|---|---|
+| `plain` (default) | straight to the server over UDP | over one connection, 2000 samples per batch | most networks |
+| `relay` | straight to the server over UDP | through the relay, a new connection per batch of 200 | a probe where the `alloy` lines show `Failed to send batch` again and again |
+| `vpn` | through the links in `service_links.txt` | as with `plain` | providers that block UDP to the server |
+
 **Service links.** `files/probes/<probe>/service_links.txt` is a separate
 list in the same format, not part of the checks: links for the probe's own
-traffic. Without links in it, the tunnel goes straight to the server over
-UDP. With links, it goes through them, for providers that block that UDP. Use
-it where the direct tunnel does not hold, and put the links in order of
-preference: pick ones whose servers allow UDP, and more than one. Every 15 s
-every link is checked with a DNS question over UDP through it; the tunnel
-stays on its link while that one passes, and moves to the first passing link
-in the file when it fails 3 times in a row. With none passing, it goes
-straight, without a VPN, until one passes again. A link can be in both files,
+traffic, used only with `outbound_access_policy: vpn`, and then it must have
+links. Put them in order of preference: pick ones whose servers allow UDP,
+and more than one. Every 15 s every link is checked with a DNS question over
+UDP through it; the tunnel stays on its link while that one passes, and moves
+to the first passing link in the file when it fails 3 times in a row. With
+none passing, it goes straight, without a VPN, until one passes again. A link can be in both files,
 but the files do not know about each other.
 
 ### 6. Deploy the central server
@@ -141,11 +155,16 @@ creates `files/probes/probe-2/` with empty link files (existing ones are
 kept), tells the server about the new member, and makes
 `files/vpnc-net/join/probe-2/compose.yml`. That file is the probe: the image,
 and the join token with the probe's key, the server's address and key, your
-SSH key and the service links. It is private.
+SSH key and, with `outbound_access_policy: vpn`, the service links. It is
+private.
 
-Put links into `service_links.txt` before the join if the probe's network
-blocks UDP to the server: they go into the token. Later changes go through
-`probes.yml`.
+If the probe's network blocks UDP to the server, set
+`outbound_access_policy: vpn` for it in `inventory.yml` and put links into
+`service_links.txt` before the join: they go into the token. If the join has
+run already, run it again: the address and keys stay, the token is new. The
+container reads the token only into an empty `./state`. Once it runs, change
+these settings with `probes.yml` while the tunnel is up, or with
+`probes-host.yml` (the host's own SSH) when it is down.
 
 Start the container on the machine, in a folder of its own:
 
@@ -160,6 +179,10 @@ or, with the host's SSH address in the inventory (`probe_host`,
 ```bash
 ansible-playbook probes-host.yml --limit probe-2
 ```
+
+`probes-host.yml` and `probes-clean.yml` find the container by its Compose
+label wherever it was started; with no container there, `probes-host.yml`
+uses `~/xray-pwc-aio` (`probe_host_dir`).
 
 The image comes from GHCR (`aio_image` in `group_vars/probes.yml`). Then put
 the links to check into `files/probes/probe-2/links.txt` (step 5) and:
@@ -178,7 +201,7 @@ ssh -J root@<central server> root@probe-2.vpnc-net.internal tail -n 20 /app/logs
 ```
 
 ```
-2026-10-12T17:43:31.366Z pwc INFO start version=0.2.0 instance=probe-2 links=2 interval=PT5M jitter=PT2M
+2026-10-12T17:43:31.366Z pwc INFO start version=0.2.1 instance=probe-2 links=2 interval=PT5M jitter=PT2M
 2026-10-12T17:43:49.536Z pwc INFO check index=0 name=msk-reality result=ok stage=3
 2026-10-12T17:43:49.536Z pwc WARN check index=1 name=msk-trojan result=partial stage=2 failed="instagram.com: HTTP 429"
 ```
@@ -198,10 +221,19 @@ build them in the Grafana UI.
 
 ### 9. Day-to-day changes
 
-**Change links or service links:** edit `files/probes/<probe>/`, then
+**Change links:** edit `files/probes/<probe>/`, then
 
 ```bash
 ansible-playbook probes.yml --limit <probe>
+```
+
+**Change service links or `outbound_access_policy`:** the same, while the
+probe's tunnel is up. If it is down (the network started to block UDP, the
+service links stopped working), go through the host first:
+
+```bash
+ansible-playbook probes-host.yml --limit <probe>    # the tunnel's settings
+ansible-playbook probes.yml --limit <probe>         # the rest: Alloy, the relay
 ```
 
 **Change the code** (the checker, xray-tun-connect): a new release is built
@@ -212,7 +244,8 @@ ansible-playbook probes.yml
 ```
 
 **Change the image** (`xray-pwc-aio/`): raise `xray-pwc-aio/VERSION`,
-publish the image (see [its README](../xray-pwc-aio/README.md#build)), then
+publish the image under your own name and set `aio_image_name` (see
+[its README](../xray-pwc-aio/README.md#build)), then
 
 ```bash
 ansible-playbook probes-host.yml
@@ -243,10 +276,10 @@ running container does not need it: its state is in `./state` on its host.
 Everything a probe runs is in one container, `xray-pwc-aio`: WireGuard,
 xray-tun-connect for the tunnel, the checker, Alloy, the relay and sshd,
 under s6. See [`../xray-pwc-aio/README.md`](../xray-pwc-aio/README.md). On
-the host it is a folder:
+the host it is a folder, `~/xray-pwc-aio/` when `probes-host.yml` made it:
 
 ```
-~/xray-pwc-aio/
+xray-pwc-aio/
 ├── compose.yml    the image and the join token
 ├── state/         keys, links, settings, Alloy's buffer: managed by Ansible
 └── logs/          aio.log, rotated weekly, four weeks kept
@@ -280,23 +313,18 @@ Playwright gets its Chromium in the volume, `/app/opt/ms-playwright`.
 
 ### The relay
 
-From a probe in Russia, a TCP connection to some foreign hosting freezes
-after about 16 KB. Small requests pass, bigger ones hang. Grafana Alloy keeps
-one long connection and sends big batches, so its data never arrives.
-
-By default every probe runs a small Caddy relay. Alloy sends metrics to the
-relay, and the relay opens a **new** connection to the central server for
-every request. Alloy also sends small batches (200 samples, about 4 KB). See
+`outbound_access_policy: relay` runs a small Caddy in the probe. Alloy sends
+metrics to it in small batches (200 samples, about 4 KB), and it opens a
+**new** connection to Prometheus for every request. See
 `prom_remote_write_upstream` and `prom_remote_write_max_samples` in
 `group_vars/probes.yml`.
 
-Inside vpnc-net the connection to Prometheus is hidden in WireGuard, and on a
-probe with service links even inside the VPN link, so the stall may not
-happen at all. Set `probe_relay: false` for such a probe in the inventory:
-the relay stays idle, and Alloy sends straight to the server's vpnc-net
-address over one connection, 2000 samples per batch. If the `alloy` lines in
-the log then show `Failed to send batch` again and again, turn the relay
-back on.
+It hides nothing: Prometheus is reached only inside vpnc-net, so the
+network sees the WireGuard UDP flow and nothing of the connections in it,
+with the relay or without. The relay helps only where Alloy's one long
+connection keeps stalling on that tunnel, which the `alloy` lines show as
+`Failed to send batch` again and again. Where the network blocks or freezes
+the tunnel itself, the relay does not help: use `vpn`.
 
 ### Caddy on the central server
 
@@ -348,7 +376,7 @@ your machine ──ssh──► server (public address)
 - **No harm to the host.** On a probe, the tunnel lives in the container's
   own network: the host gets no interface, route or rule. Only
   `vpnc_net_subnet` goes into the tunnel.
-- **Service links.** On a probe with links in `service_links.txt`, the
+- **Service links.** On a probe with `outbound_access_policy: vpn`, the
   tunnel's endpoint is `127.0.0.1:51974`, and the `xtc-forward` service,
   `xray-tun-connect -forward`, sends its UDP through one link at a time to the
   server. See step 5 for how the link is chosen, and the
@@ -364,8 +392,9 @@ your machine ──ssh──► server (public address)
   13 uses `docker-compose`. The playbook picks the right one and installs
   Docker only if it is missing. On the probes Docker is yours to install.
 - **Old data after a network break.** Alloy keeps unsent data for up to 8
-  hours and sends it when the network is back. Prometheus accepts samples up
-  to 1 hour old (`out_of_order_time_window`). Data older than that is lost.
+  hours and sends it when the network is back, and Prometheus accepts samples
+  that late (`out_of_order_time_window`): both are `metrics_backlog` in
+  `group_vars/all.yml`. Data older than that is lost.
 - **Links stay out of the terminal.** The tasks that write them use
   `no_log: true`, so `--diff` does not print them.
 - **On macOS** Docker Desktop does not keep the group of a file in `./state`,
@@ -389,8 +418,8 @@ Everything secret is git-ignored and stays on your machine:
 
 `vault.yml` is plain text, not encrypted with ansible-vault: protect your
 machine accordingly, and keep a backup of it and of `host_vars/`. On a
-probe, the secrets are in `~/xray-pwc-aio/` (`compose.yml`, `state/`),
-readable by root.
+probe, the secrets are in the folder of the container (`compose.yml`,
+`state/`), readable by root.
 
 ## Pinned versions
 

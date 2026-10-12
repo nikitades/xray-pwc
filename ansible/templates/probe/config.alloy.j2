@@ -51,7 +51,7 @@ prometheus.remote_write "central" {
   }
 
   endpoint {
-    url = "{{ 'http://127.0.0.1:8080' if probe_relay else prom_remote_write_upstream }}/api/v1/write"
+    url = "{{ 'http://127.0.0.1:8080' if aio_relay else prom_remote_write_upstream }}/api/v1/write"
 
     queue_config {
       max_samples_per_send = {{ prom_remote_write_max_samples }}
@@ -63,8 +63,8 @@ prometheus.remote_write "central" {
   }
 
   // The network may be gone for a long time: keep the WAL and send it later.
-  // Prometheus accepts late samples through out_of_order_time_window.
+  // Prometheus accepts late samples as long as this, out_of_order_time_window.
   wal {
-    max_keepalive_time = "8h"
+    max_keepalive_time = "{{ metrics_backlog }}"
   }
 }

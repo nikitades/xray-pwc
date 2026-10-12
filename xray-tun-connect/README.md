@@ -19,7 +19,7 @@ Internally, links are parsed by libXray and served by in-process xray-core.
 ```
 xray-tun-connect -link <share-link> [-link ...]
 xray-tun-connect -links "<link1>,<link2>"        # commas or newlines; # starts a comment
-printf '%s\n\n' "$LINKS" | xray-tun-connect -stdin-links   # links stay out of `ps`
+xray-tun-connect -stdin-links < links.txt         # links stay out of `ps`
 xray-tun-connect -forward vpn.example.com:51973 -start-port 51974 -stdin-links < links.txt
 xray-tun-connect -version
 ```
@@ -74,7 +74,7 @@ VMess, Trojan and Shadowsocks do, and the server must allow it.
 that started it:
 
 ```json
-{"version":"0.5.0","listen":"127.0.0.1","tunnels":[
+{"version":"0.5.1","listen":"127.0.0.1","tunnels":[
   {"index":0,"port":10000,"name":"MSK","protocol":"vless","ok":true},
   {"index":1,"port":10001,"ok":false,"error":"unsupported share format"},
   {"index":2,"port":10002,"name":"TRJ","protocol":"trojan","ok":true}
@@ -90,14 +90,14 @@ spaces in quotes. Whatever collects it puts the time and the service in
 front. Links appear by name only.
 
 ```
-INFO start version=0.5.0 listen=127.0.0.1 port=51974 forward=vpn.example.com:51973 links=2 direct=true
+INFO start version=0.5.1 listen=127.0.0.1 port=51974 forward=vpn.example.com:51973 links=2 direct=true
 WARN link_rejected index=2 name=old reason="unsupported share format"
 INFO link_usable index=0 name=MSK
 INFO active index=0 name=MSK
 WARN link_unusable index=0 name=MSK fails=3 reason="dns timeout"
 WARN switch from=MSK to=AMS reason=unusable
 INFO switch from=direct to=MSK reason=link_recovered
-ERROR no_tunnels usable=0 direct=false
+ERROR no_tunnels usable=0 direct=off
 ```
 
 | event | level | when |
@@ -108,15 +108,17 @@ ERROR no_tunnels usable=0 direct=false
 | `active` | INFO | forward: the first link on the port |
 | `switch` | WARN, INFO from direct | forward: the port moves to another link |
 | `link_failed` | WARN | forward: the chosen link did not start on the port |
-| `no_tunnels` | ERROR | no usable link (forward: and no direct), every minute |
+| `no_tunnels` | ERROR | no usable link, every minute. Forward: `direct=off` with `-disable-direct`, `direct=failed` when direct did not start either |
 | `usage`, `start_failed`, `forward_failed` | ERROR | the process exits |
 
 xray-core's own lines, at `-xray-log-level`, go to stderr as they are.
 
 Lifecycle: after the report the process serves until SIGINT/SIGTERM. When stdin
 is a pipe, EOF on it also shuts the process down, so a parent that dies takes
-the tunnels with it. Run it with `stdin=PIPE` and keep the pipe open; for a
-long-running forward, give the links as a file on stdin, not a pipe.
+the tunnels with it. Run it with `stdin=PIPE` and keep the pipe open. From a
+shell, give the links as a file on stdin, not a pipe: with
+`printf ... | xray-tun-connect -stdin-links` it stops right after its report,
+because `printf` closes the pipe.
 
 With `-stdin-links` the same pipe carries the links first: write them one per
 line, then an empty line, then keep the pipe open. Command-line arguments are
@@ -126,8 +128,8 @@ Where stderr is a journald socket (systemd), xray-core cannot open it for its
 log: start fails with `open /dev/stderr: no such device or address`. Use
 `-xray-log-level none` there.
 
-Exit codes: `0` clean shutdown, `1` core failed to start or no link was usable
-(the report is still printed), `2` usage error.
+Exit codes: `0` clean shutdown, `1` core failed to start (`start_failed`, no
+report) or no link was usable (the report is printed first), `2` usage error.
 
 ## Build
 

@@ -5,7 +5,7 @@ global:
 storage:
   tsdb:
     # Probes resend their WAL after a network break, so accept late samples.
-    out_of_order_time_window: 1h
+    out_of_order_time_window: {{ metrics_backlog }}
 
 scrape_configs:
   - job_name: prometheus

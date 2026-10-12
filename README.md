@@ -22,7 +22,7 @@ A simple schema:
 The same network lets you reach the probes over SSH, from
 the control plane machine (the one you run Ansible on) through the central
 server. Where the provider blocks that connection, a probe carries it
-through one of your VPN links instead.
+through one of your VPN links instead (`outbound_access_policy: vpn`).
 
 To make it clear, there are two lists of VPN configs:
 
@@ -32,9 +32,10 @@ To make it clear, there are two lists of VPN configs:
 and these lists don't have to be the same. But they might.
 
 A probe is one Docker container, so any machine with Docker can be one,
-Linux or macOS. Everything is installed with Ansible from your own machine,
-and what goes into the probes is built there too. The project is young: treat
-the defaults as a starting point, not as tuned values. No root needed!
+Linux or macOS. Its image comes ready from a registry; everything else is
+installed with Ansible from your own machine, and the code that runs in the
+probes, the checker and xray-tun-connect, is built there. The project is
+young: treat the defaults as a starting point, not as tuned values. No root needed!
 
 ## Which part you need
 
@@ -74,16 +75,25 @@ s6:
 |---|---|
 | `pwc` | the checker. It opens the sites through each link with Chromium and xray-tun-connect, and uses the probe's own network and DNS, so it sees what a local user sees |
 | `alloy` | Grafana Alloy: every 30 s it collects the checker's results and the host's CPU, memory, disk and network, and sends them on. If the server is out of reach, it keeps up to 8 hours of data and sends it later |
-| `relay` | optional (`probe_relay`, on by default): a small Caddy that takes Alloy's data and sends it to Prometheus, a new connection for every batch, because some providers freeze a long connection to foreign hosting after about 16 KB |
+| `relay` | only with `outbound_access_policy: relay`: a small Caddy between Alloy and Prometheus, a new connection for every small batch, for a probe where Alloy's one long connection keeps stalling. It hides nothing from the network: the data is inside the WireGuard tunnel either way |
 | `wg` | the vpnc-net client, in the container's own network: the host gets no interface or route, and other VPNs on the machine keep working |
-| `xtc-forward` | only with service links: carries vpnc-net through one of those VPN links, for providers that block UDP to the server. It checks every link all the time and moves to the next good one when the current one fails; with none good, it goes without a VPN |
+| `xtc-forward` | only with `outbound_access_policy: vpn`: carries vpnc-net through one of the probe's service links, VPN links of its own, for providers that block UDP to the server. It checks every link all the time and moves to the next good one when the current one fails; with none good, it goes without a VPN |
 | `sshd` | for Ansible and you, through the central server |
 
 Everything logs into one file on the host, `logs/aio.log`, rotated weekly.
 
+How the probe's own traffic leaves its network is one setting per probe,
+`outbound_access_policy`:
+
+| policy | vpnc-net | Alloy sends |
+|---|---|---|
+| `plain` (default) | straight to the server over UDP | over one connection, in big batches |
+| `relay` | straight to the server over UDP | through the relay, a new connection per small batch |
+| `vpn` | through the service links | over one connection, in big batches |
+
 ```
 probe:  pwc -> VPN link -> websites
-        alloy -> relay -> vpnc-net (-> service link) -> server: prometheus -> grafana
+        alloy [-> relay] -> vpnc-net [-> service link] -> server: prometheus -> grafana
 ```
 
 ## Where to read more
@@ -94,7 +104,7 @@ probe:  pwc -> VPN link -> websites
   machine.
 - [`xray-tun-connect/`](xray-tun-connect/README.md), a small Go tool the
   checker uses: it turns share links into local ports, and carries the
-  vpnc-net tunnel on probes with service links.
+  vpnc-net tunnel on probes with `outbound_access_policy: vpn`.
 - [`xray-pwc-aio/`](xray-pwc-aio/README.md), the probe container: its
   services, its log, what is in the image and what Ansible brings.
 - [`ansible/`](ansible/README.md), the deployment: the central server and

@@ -8,9 +8,11 @@ ansible_ssh_private_key_file: "{{ vpnc_net_ssh_public_key | regex_replace('\\.pu
 ansible_ssh_common_args: "{{ vpnc_net_ssh_args }}"
 ansible_python_interpreter: /usr/local/bin/python3
 
-# The image: the wrapper, rebuilt rarely and published to GHCR (xray-pwc-aio/README.md).
+# The image: the wrapper, rebuilt rarely and published to a registry
+# (xray-pwc-aio/README.md). Its tag is xray-pwc-aio/VERSION. A fork that changes
+# the image publishes its own and sets aio_image_name in inventory.yml.
 aio_source_dir: "{{ playbook_dir }}/../xray-pwc-aio"
-aio_image: "ghcr.io/nikitades/xray-pwc-aio:{{ lookup('file', aio_source_dir ~ '/VERSION') }}"
+aio_image: "{{ aio_image_name | default('ghcr.io/nikitades/xray-pwc-aio') }}:{{ lookup('file', aio_source_dir ~ '/VERSION') }}"
 
 # What Ansible delivers into the container, built here from xray-pwc-aio/Dockerfile:
 # the release (the checker and xray-tun-connect, named by a hash of their sources) and
@@ -28,7 +30,7 @@ aio_env:
   AIO_SERVER_IP: "{{ vpnc_net_server_ip }}"
   AIO_FORWARD: "{{ vpnc_net_endpoint }}"
   AIO_VIA_PORT: "{{ vpnc_net_via_port }}"
-  AIO_RELAY: "{{ probe_relay | bool | lower }}"
+  AIO_RELAY: "{{ aio_relay | bool | lower }}"
 
 # The join token in compose.yml: what the container turns into /app/state on its
 # first start. The same values and templates as probes.yml, so Ansible later finds
@@ -60,12 +62,20 @@ probe_links: "{{ query('file', *probe_link_files) | join('\n') | split('\n') | m
 # default. Part of compose.yml: a change needs the container recreated on its host.
 probe_dns: []
 
+# How the probe's own traffic (vpnc-net, and the metrics inside it) leaves its
+# network. Set it per probe in the inventory:
+#   plain  vpnc-net straight to the server over UDP; Alloy sends over one
+#          connection, 2000 samples per batch.
+#   relay  the same tunnel, and Alloy sends through a local Caddy: a new
+#          connection for every batch of 200 samples. For a probe where Alloy's
+#          one long connection keeps stalling ("Failed to send batch" in the log).
+#          It hides nothing: the network sees only the WireGuard UDP either way.
+#   vpn    vpnc-net through the links in files/probes/<probe>/service_links.txt,
+#          for networks that block UDP to the server; Alloy as with plain.
+outbound_access_policy: plain
+outbound_access_policies: [plain, relay, vpn]
+aio_relay: "{{ outbound_access_policy == 'relay' }}"
+
 # Alloy sends to Prometheus on the server's vpnc-net address.
 prom_remote_write_upstream: "http://{{ vpnc_net_server_ip }}:{{ hostvars[vpnc_net_server].prom_port | default(9090) }}"
-# Some networks freeze a TCP connection to foreign hosting after ~16 KB. With the
-# relay, Alloy sends through a local Caddy that opens a new connection for every
-# request, in small batches. Inside vpnc-net the connection is hidden from DPI, so a
-# probe can go without it: probe_relay: false in the inventory, and Alloy sends
-# straight to Prometheus over one connection, in Alloy's own batch size.
-probe_relay: true
-prom_remote_write_max_samples: "{{ 200 if probe_relay else 2000 }}"
+prom_remote_write_max_samples: "{{ 200 if aio_relay else 2000 }}"

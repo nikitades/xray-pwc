@@ -2,6 +2,7 @@
 # The probes: Ansible works inside each probe's xray-pwc-aio container, through
 # vpnc-net and the bastion. It delivers the code (a release) and the tools,
 # writes the state (links, tunnel, Alloy, relay) and restarts what changed.
+# With the tunnel down, probes-host.yml rewrites the tunnel's part from the host.
 # The container itself is started on its host from the compose.yml of
 # vpnc-net-join.yml.
 - name: VPN probes (xray-pwc-aio)
@@ -15,6 +16,9 @@
           - probe_links | length > 0
         fail_msg: no links in files/probes/{{ inventory_hostname }}/links.txt
         quiet: true
+
+    - name: Outbound access policy
+      ansible.builtin.import_tasks: tasks/outbound-policy.yml
 
     - name: Wait for the container
       ansible.builtin.wait_for_connection:
@@ -219,14 +223,14 @@
         dest: /app/state/relay/Caddyfile
         mode: "0644"
       notify: Restart relay
-      when: probe_relay
+      when: aio_relay
 
     - name: Remove relay config
       ansible.builtin.file:
         path: /app/state/relay/Caddyfile
         state: absent
       notify: Restart relay
-      when: not probe_relay
+      when: not aio_relay
 
     - name: Switch to the release
       ansible.builtin.shell: |

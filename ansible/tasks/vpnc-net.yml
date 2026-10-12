@@ -11,9 +11,10 @@
     fail_msg: "{{ inventory_hostname }} has no host_vars/{{ inventory_hostname }}/vpnc-net.yml (vpnc-net-join.yml -e name={{ inventory_hostname }})"
     quiet: true
 
+# iptables for the rule in PostUp: a bare Debian 13 has only nftables.
 - name: Install WireGuard tools
   ansible.builtin.apt:
-    name: wireguard-tools
+    name: [wireguard-tools, iptables]
     state: present
     update_cache: true
     cache_valid_time: 3600

@@ -25,9 +25,9 @@ from xray_tun_pwc.log import relayed
 
 INSTALL_HINT = (
     "Install xray-tun-connect: run `make install` (go install) in the xray-tun-connect source "
-    "tree, or download xray-tun-connect-<os>-<arch> from an xray-tun-connect/v* GitHub release "
-    "and put it on PATH. Lookup order: $GOBIN, $GOPATH/bin (default ~/go/bin), PATH; "
-    "PWC_XRAY_TUN_CONNECT_BIN pins an explicit path."
+    "tree, or build it there with `make build` and put it on PATH. Lookup order: $GOBIN if set, "
+    "else $GOPATH/bin (default ~/go/bin), then PATH; PWC_XRAY_TUN_CONNECT_BIN pins an explicit "
+    "path."
 )
 
 REPORT_GRACE_SECONDS = 10.0

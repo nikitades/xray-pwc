@@ -14,7 +14,7 @@ on any Docker host (Linux or macOS). Probes need no public IP: they dial out ove
 private WireGuard network, **vpnc-net**; SSH to them goes through the central server
 (bastion).
 
-Versions: checker 0.2.0 (`xray-tun-pwc/pyproject.toml`), xray-tun-connect 0.5.0
+Versions: checker 0.2.1 (`xray-tun-pwc/pyproject.toml`), xray-tun-connect 0.5.1
 (`xray-tun-connect/cmd/xray-tun-connect/VERSION`), image 1.0.0 (`xray-pwc-aio/VERSION`).
 Semver: new feature -> minor, fix -> patch; bump with every change. Few probes in production.
 
@@ -40,8 +40,9 @@ ansible/            Deployment. Run every command from this directory (ansible.c
 
 ```
 probe container:  pwc -> xray-tun-connect (SOCKS 127.0.0.1:10000+i) -> VPN link -> websites
-                  pwc :8000 -> alloy (scrape 30s) -> relay 127.0.0.1:8080 -> wg vpnc-net
+                  pwc :8000 -> alloy (scrape 30s) [-> relay 127.0.0.1:8080] -> wg vpnc-net
                   [wg endpoint 127.0.0.1:51974 -> xtc-forward -> service link] -> server:51973/udp
+                  [] by outbound_access_policy: relay -> the relay; vpn -> xtc-forward
 server:           prometheus (remote-write receiver) <- grafana <- caddy (public HTTPS)
 control plane:    ssh -J root@<server> root@<probe>.vpnc-net.internal   (not a vpnc-net member)
 ```
@@ -52,7 +53,7 @@ Compose project `vpn-monitoring`, dir `/opt/vpn-monitoring`:
 
 | service | image | binds | notes |
 |---|---|---|---|
-| prometheus | prom/prometheus:v3.15.0 | 127.0.0.1:9090, <vpnc ip>:9090 | `--web.enable-remote-write-receiver`, retention 180d / 40GB, out_of_order window 1h, **no auth** |
+| prometheus | prom/prometheus:v3.15.0 | 127.0.0.1:9090, <vpnc ip>:9090 | `--web.enable-remote-write-receiver`, retention 180d / 40GB, out_of_order window `metrics_backlog` (8h, = Alloy WAL keepalive), **no auth** |
 | grafana | grafana/grafana:13.2.2 | 127.0.0.1:3000 | admin password from vault; data source URL `http://prometheus:9090` (added by hand) |
 | coredns | coredns/coredns:1.12.1 | <vpnc ip>:53 udp+tcp | zone `vpnc-net.internal` from `coredns/vpnc-net.hosts` (`<inventory name>.vpnc-net.internal`, `prom.vpnc-net.internal`); `.` forwarded to 1.1.1.1, 8.8.8.8; auto reload |
 
@@ -66,9 +67,11 @@ vpnc address). `ip_forward` stays as Docker sets it; peer-to-peer is dropped by 
 
 ### Probe: the `xray-pwc-aio` container
 
-On the host: `~/xray-pwc-aio/{compose.yml,state/,logs/}` + named volume `xray-pwc-aio_app`.
+On the host: `<folder>/{compose.yml,state/,logs/}` + named volume `xray-pwc-aio_app`; folder =
+Compose label `com.docker.compose.project.working_dir` of a running container, else
+`~/xray-pwc-aio` (`probe_host_dir`), see `tasks/probe-host-folder.yml`.
 `compose.yml` (template `templates/probe/compose.yml.j2`): image
-`ghcr.io/nikitades/xray-pwc-aio:<VERSION>`, `hostname: <probe>`, `cap_add: NET_ADMIN`,
+`aio_image` = `<aio_image_name | default ghcr.io/nikitades/xray-pwc-aio>:<VERSION>`, `hostname: <probe>`, `cap_add: NET_ADMIN`,
 `/dev/net/tun`, `shm_size: 512m`, `dns:` from `probe_dns`, env `VPNC_JOIN` (token),
 mounts `app:/app`, `./state:/app/state`, `./logs:/app/logs`, host `/proc`,`/sys`,`/` ro.
 
@@ -96,10 +99,10 @@ run as `aio-run <svc> <script>` (output -> `aio-log <svc>`), `finish` logs unexp
 |---|---|
 | `init-aio` (oneshot, `with-contenv`) | `bootstrap.py`: checks CapEff NET_ADMIN and `/dev/net/tun`; chowns `/app` root; empty state + `VPNC_JOIN` -> writes state (fails on hostname != node); state present -> ignores token; creates SSH host key |
 | `svc-wg` | `wg-quick up state/wg/vpnc-net.conf` (`WG_QUICK_USERSPACE_IMPLEMENTATION=wireguard-go` fallback); logs `up` (impl kernel/wireguard-go), `handshake_ok`/`handshake_lost` (stale > 180 s), every 30 s |
-| `svc-xtc-forward` | links in `service_links.txt` -> `xray-tun-connect -stdin-links -forward $AIO_FORWARD -listen 127.0.0.1 -start-port $AIO_VIA_PORT -xray-log-level none < file`; else idle |
+| `svc-xtc-forward` | links in `service_links.txt` (written only for policy vpn) -> `xray-tun-connect -stdin-links -forward $AIO_FORWARD -listen 127.0.0.1 -start-port $AIO_VIA_PORT -xray-log-level none < file`; else idle |
 | `svc-pwc` | `s6-setuidgid abc current/venv/bin/xray-tun-pwc`, `PWC_CONFIG_PATH=state/links.txt`, `PWC_INSTANCE=$AIO_NODE`, `PLAYWRIGHT_BROWSERS_PATH` from `current/browsers-path` |
 | `svc-alloy` | `current/bin/alloy run state/alloy/config.alloy --storage.path=state/alloy/data --server.http.listen-addr=127.0.0.1:12345` |
-| `svc-relay` | `AIO_RELAY=true` -> `caddy run --config state/relay/Caddyfile` (`http://127.0.0.1:8080`, h1, keepalive off); else idle |
+| `svc-relay` | `AIO_RELAY=true` (policy relay) -> `caddy run --config state/relay/Caddyfile` (`http://127.0.0.1:8080`, h1, keepalive off); else idle |
 | `svc-sshd` | `sshd -D -e -f usr/local/lib/aio/sshd_config -o AllowUsers=root@$AIO_SERVER_IP` (key only) |
 | cron (linuxserver `svc-cron`) | `/etc/crontabs/root`: nightly logrotate, `aio.log` weekly, rotate 4, compress, delaycompress, copytruncate |
 
@@ -117,13 +120,14 @@ Links only by name. Implementations: `xray-tun-connect/internal/logfmt`, `xray-t
 
 ## 5. xray-tun-pwc (checker)
 
-Per link, every `PWC_CHECK_INTERVAL` (PT5M) + random `PWC_CHECK_JITTER` (PT2M), links
-sequentially, one Chromium at a time:
+One round every `PWC_CHECK_INTERVAL` (PT5M) + random `PWC_CHECK_JITTER` (PT2M):
 
-1. xray-tun-connect starts SOCKS tunnels (links via stdin, not argv; `-xray-log-level error`).
-2. Open `PWC_HEAVY_VISITS` (3) random URLs from `PWC_HEAVY_SITES`; success = `DOMContentLoaded`.
+1. One xray-tun-connect process for the round: SOCKS tunnels for all links at once
+   (links via stdin, not argv; `-xray-log-level error`).
+2. Per link, sequentially, a fresh browser (one Chromium at a time): open `PWC_HEAVY_VISITS`
+   (3) random URLs from `PWC_HEAVY_SITES`; success = `DOMContentLoaded`.
 3. Open all `PWC_TARGET_SITES` (Instagram, Facebook); success = HTTP 200.
-4. Close tunnel + browser.
+4. After the last link: close the tunnels.
 
 Each page: 3 attempts, 30 s navigation timeout, backoff 2 s, 4 s.
 
@@ -131,7 +135,9 @@ Stage (`pwc_tunnel_stage`): 0 link broken, 1 unreachable (no proof traffic passe
 2 partial, 3 all OK. Proof of passage: page opened, any HTTP status, TLS handshake
 failure. Not proof: `ERR_PROXY_CONNECTION_FAILED`, timeout, reset, DNS error.
 Log per link: `check index name result(ok|partial|unreachable|link_broken) stage [failed="..."]`,
-INFO / WARN / ERROR; `start version instance links interval jitter`; `xtc_unavailable` ERROR exits.
+INFO / WARN / ERROR; `start version instance links interval jitter`; `xtc_unavailable` ERROR exits;
+`round_failed err` ERROR = `XrayTunConnectFailed` in a round (no report, port taken): round
+skipped, metrics unchanged, loop goes on.
 
 Metrics on :8000: `pwc_tunnel_stage{instance,tunnel,stable_id}`;
 `pwc_tunnel_error{...,error_type}` = 1 if last check hit it, 0 if only earlier.
@@ -141,7 +147,8 @@ metrics get `job="node"`, `instance=<probe>`.
 
 Env: `PWC_CONFIG_PATH`, `PWC_INSTANCE`, `PWC_HEAVY_SITES`, `PWC_HEAVY_VISITS`,
 `PWC_TARGET_SITES`, `PWC_CHECK_INTERVAL`, `PWC_CHECK_JITTER`, `PWC_HTTP_PORT`,
-`PWC_XRAY_TUN_CONNECT_BIN` (else `$GOBIN`, `$GOPATH/bin`, `PATH`; minimum 0.5.0 checked).
+`PWC_XRAY_TUN_CONNECT_BIN` (else `$GOBIN` if set, otherwise `$GOPATH/bin` (~/go/bin); then `PATH`;
+minimum 0.5.0 checked). No prebuilt binaries or GitHub releases: `make install|build`.
 
 Architecture: hexagonal. `domain/` entities, sites, schedule; `app/` use cases + Protocol
 ports; `ports/` adapters (Playwright browser, Prometheus metrics, xray-tun-connect
@@ -163,7 +170,8 @@ process, stderr relayed through `log.relayed`); `entrypoints/cli.py`; `container
   unusable (`link_unusable`). The port keeps its link while usable (no failback); else the
   first usable in given order (priority); else `DirectLink` (`direct://#direct`, freedom,
   never checked, last resort, left as soon as a link is usable: `switch reason=link_recovered`)
-  unless `-disable-direct`; else port closed and `no_tunnels` ERROR every minute. A link
+  unless `-disable-direct`; else port closed and `no_tunnels usable=0 direct=off|failed` ERROR
+  every minute (`failed`: direct did not start on the port). A link
   that fails to start on the port: `link_failed`, marked unusable. First serve: `active`;
   later: `switch from to reason=unusable`. Code: `internal/tun/forward.go`.
 - Flags: `-link`, `-links`, `-stdin-links` (until first empty line), `-start-port` 10000,
@@ -171,7 +179,9 @@ process, stderr relayed through `log.relayed`); `entrypoints/cli.py`; `container
   `-disable-direct`, `-xray-log-level` warning (xray's own lines, raw, stderr), `-ready-timeout` 10s, `-version`.
 - Lives until SIGINT/SIGTERM, or EOF on stdin **when stdin is a pipe**; for a long forward
   give the links as a regular file on stdin. Under journald use `-xray-log-level none`.
-- Exit: 0 clean, 1 core failed / no usable link (default mode), 2 usage.
+- Exit: 0 clean, 1 core failed (`start_failed`, no report) / no usable link (default mode,
+  report printed first), 2 usage. `printf ... | xray-tun-connect -stdin-links` exits right
+  after the report (EOF on the pipe).
 - Tests (`go test -race ./...`): parsing, config build, stable ports, SOCKS traffic,
   forward TCP+UDP echo via DirectLink, first usable, no failback, move to first usable,
   leave direct, no_tunnels repeat + closed port, rejected links, real DNS check through a
@@ -195,7 +205,10 @@ process, stderr relayed through `log.relayed`); `entrypoints/cli.py`; `container
 | `vpnc_net_bastion` | `<server ansible_user>@<server ansible_host>` |
 | `vpnc_net_ssh_args` | `-o ProxyJump=<bastion> -o StrictHostKeyChecking=accept-new` |
 | `vpnc_net_ssh_public_key` | `vpnc_net_ssh_key` from inventory, default `~/.ssh/id_ed25519.pub` |
-| `vpnc_net_via_lines/links/via` | normalized `files/probes/<host>/service_links.txt`; via = has links |
+| `vpnc_net_via_lines` | normalized `files/probes/<host>/service_links.txt` |
+| `vpnc_net_via` | not the server and `outbound_access_policy == 'vpn'` |
+| `vpnc_net_via_links` | the lines + `\n` when via, else `''` (token, `state/service_links.txt`) |
+| `metrics_backlog` | `8h`: Alloy WAL `max_keepalive_time` and Prometheus `out_of_order_time_window` |
 | `vpnc_net_via_port` | 51974 |
 | `vpnc_net_join_dir` | `ansible/files/vpnc-net/join/` |
 
@@ -207,9 +220,16 @@ process, stderr relayed through `log.relayed`); `entrypoints/cli.py`; `container
 - Probe sshd accepts only `root@<server vpnc ip>`, key `vpnc_net_ssh_key`.
 - Server reload = `systemctl reload wg-quick@vpnc-net` (`wg syncconf`): adding peers never
   drops others. Probe: `wg syncconf` on config change; new Address/MTU needs `s6-svc -r svc-wg`.
+- `outbound_access_policy` (per probe, `group_vars/probes.yml`, default `plain`; checked by
+  `tasks/outbound-policy.yml` in join, probes.yml, probes-host.yml; old `probe_relay` fails):
+  `plain` = direct UDP, Alloy straight to Prometheus, 2000 samples/batch; `relay` = direct
+  UDP, Alloy -> local Caddy (`aio_relay`, `AIO_RELAY=true`), 200 samples/batch, new
+  connection per request; `vpn` = via service links (must be non-empty), Alloy as plain.
+  The relay hides nothing from DPI (all inside WG UDP); only for a stalling long connection.
 - Service links (via): wg `Endpoint = 127.0.0.1:51974`, `svc-xtc-forward` carries it (section 6).
-  The server sees the VPN server's address; WG roaming handles switches. Empty or no file
-  = direct UDP. Links must allow UDP on the VPN server (x-ui may disable it).
+  The server sees the VPN server's address; WG roaming handles switches. Other policies
+  write an empty `service_links.txt` (= direct UDP). Links must allow UDP on the VPN server
+  (x-ui may disable it).
 - The checker keeps the probe's real DNS; Alloy and the relay use the server IP directly.
 
 ### 7.3 Members and files (all git-ignored)
@@ -234,13 +254,15 @@ checkout, `ansible-galaxy collection install -r requirements.yml -p ./collection
 | command | does |
 |---|---|
 | `ansible-playbook monitoring.yml` | vpnc-net server, Prometheus, Grafana, CoreDNS, Caddy |
-| `ansible-playbook vpnc-net-join.yml -e name=<n>` | probe: address, keys, inventory.d, empty link files, server update, compose.yml; server name: keys only |
-| `ansible-playbook probes-host.yml [--limit p]` | on the host (`probe_host[_user,_port]`): template compose.yml into `~/xray-pwc-aio`, `docker compose up -d --pull missing`, remove other image tags |
+| `ansible-playbook vpnc-net-join.yml -e name=<n>` | probe: address, keys, inventory.d, empty link files, server update, compose.yml; server name: keys only (the server play's `hosts` is `none` then) |
+| `ansible-playbook probes-host.yml [--limit p]` | on the host (`probe_host[_user,_port]`): find the folder (label, else `~/xray-pwc-aio`), template compose.yml, `docker compose up -d --pull missing`, wait for `state/ssh/ssh_host_ed25519_key`, write `aio.env`, `wg/vpnc-net.conf`, `service_links.txt` via `docker exec -i` (cmp, atomic mv), on change `s6-svc -r` wg, xtc-forward, relay, sshd; remove other tags of the image |
 | `ansible-playbook probes.yml [--limit p]` | in the container: build + deliver release/alloy/caddy, state files, switch release, prune |
-| `ansible-playbook probes-clean.yml --limit p` | on the host: `docker compose down -v --rmi all`, remove the folder |
+| `ansible-playbook probes-clean.yml --limit p` | on the host: find the folder like probes-host, `docker compose down -v --rmi all`, fail if `xray-pwc-aio` still exists, remove the folder |
 | `ansible-playbook vpnc-net-remove.yml -e name=<n>` | forget member (host_vars, inventory.d, join dir), update server; links stay |
 
-`--check --diff` works everywhere. No Makefile in `ansible/` (use plain ansible-playbook).
+`--check --diff` works everywhere (read-only commands have `check_mode: false`); builds,
+deliveries, container starts and a new member's later plays are skipped in check mode.
+No Makefile in `ansible/` (use plain ansible-playbook).
 
 `probes.yml` (connection: `group_vars/probes.yml`: `ansible_host=vpnc_net_ip`, `root`,
 key = `vpnc_net_ssh_key` without `.pub`, ProxyJump, python `/usr/local/bin/python3`; no
@@ -255,7 +277,7 @@ link alloy/caddy into the release -> release Playwright != image's -> install Ch
 Handlers: `s6-svc -r /run/service/svc-<x>`; Sync vpnc-net = `wg syncconf`; both tunnel
 handlers then `wait_for_connection`.
 
-`tasks/vpnc-net.yml` (server only): assert keys -> apt wireguard-tools -> template
+`tasks/vpnc-net.yml` (server only): assert keys -> apt wireguard-tools, iptables -> template
 `/etc/wireguard/vpnc-net.conf` (notify reload) -> ensure `wg-quick@vpnc-net` -> docker
 drop-in -> CoreDNS files -> flush handlers.
 
@@ -287,7 +309,8 @@ them use `no_log: true`. The repo is public: no real hostnames, IPs or links in 
 ## 11. Known pitfalls
 
 - RU DPI: UDP to some foreign hosting is cut; TCP flows stall after ~16 KB. Hence heavy
-  pages, the per-request relay, and service links.
+  pages and service links (policy vpn). The relay dates from when metrics went over plain
+  TCP; inside WG it is optional (policy relay).
 - Some home routers put the EDNS OPT record before the answer; Go resolvers fail ->
   `probe_dns: [1.1.1.1, 8.8.8.8]` for that probe (in compose.yml: needs `probes-host.yml`).
 - Caddy treats an IP site address as HTTPS even with `auto_https off`: the relay site is

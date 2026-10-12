@@ -1,0 +1,32 @@
+---
+# The container's folder on the probe's host: where Compose started it, from its
+# label, so a probe started by hand in any folder is found; with no container,
+# probe_host_dir in the home. Sets probe_folder.
+
+# become changes the home, so the folder gets an absolute path first.
+- name: Find the home
+  ansible.builtin.command: printenv HOME
+  register: probe_home
+  changed_when: false
+  check_mode: false
+
+- name: Find the container's folder
+  ansible.builtin.command: >-
+    docker inspect xray-pwc-aio
+    --format '{% raw %}{{ index .Config.Labels "com.docker.compose.project.working_dir" }}{% endraw %}'
+  become: true
+  register: probe_running_dir
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Pick the folder
+  ansible.builtin.set_fact:
+    probe_folder: >-
+      {{ probe_running_dir.stdout | trim
+         if probe_running_dir.rc == 0 and probe_running_dir.stdout | trim | length > 0 else
+         probe_host_dir if probe_host_dir is abs else probe_home.stdout ~ '/' ~ probe_host_dir }}
+
+- name: Show the folder
+  ansible.builtin.debug:
+    msg: "{{ probe_folder }}{{ ' (the running container)' if probe_running_dir.rc == 0 else '' }}"

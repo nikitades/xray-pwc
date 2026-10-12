@@ -10,7 +10,12 @@ from packaging.version import Version
 from pydantic import Field, HttpUrl
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from xray_tun_pwc.app import MetricsServer, TunnelMetrics, XrayTunConnectUnavailable
+from xray_tun_pwc.app import (
+    MetricsServer,
+    TunnelMetrics,
+    XrayTunConnectFailed,
+    XrayTunConnectUnavailable,
+)
 from xray_tun_pwc.app.check import CheckConfigsUsecase, CheckRequest
 from xray_tun_pwc.app.xray_tun_connect_version import (
     CheckXrayTunConnectVersionRequest,
@@ -107,7 +112,12 @@ class CliApp:
         return 0
 
     async def run_once(self, configs: tuple[VpnConfigLine, ...]) -> tuple[TunnelCheck, ...]:
-        checks = await self.check_configs.handle(CheckRequest(configs))
+        try:
+            checks = await self.check_configs.handle(CheckRequest(configs))
+        except XrayTunConnectFailed as e:
+            # Not one link's fault: the round is skipped, the metrics keep the last one.
+            log(ERROR, "round_failed", err=e)
+            return ()
         self.metrics.record(checks)
         for index, check in enumerate(checks):
             log(check.log_level, "check", index=index, **check.log_fields())

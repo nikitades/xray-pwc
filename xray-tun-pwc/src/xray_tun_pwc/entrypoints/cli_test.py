@@ -78,6 +78,21 @@ async def test_cli_app_prints_one_line_per_tunnel(container: Container, settings
     ]
 
 
+async def test_cli_app_logs_a_failed_round_and_goes_on(
+    container: Container, settings: Settings, capsys
+):
+    container[XrayTunConnect] = FakeXrayTunConnect(start_error="printed no report in 20s")
+    metrics = container[TunnelMetrics]
+    assert isinstance(metrics, FakeMetrics)
+
+    assert await container[CliApp].run_once(settings.get_config()) == ()
+
+    assert not metrics.recorded
+    assert capsys.readouterr().err.splitlines() == [
+        'ERROR round_failed err="printed no report in 20s"',
+    ]
+
+
 async def test_cli_app_introduces_itself_then_checks_until_stopped(container: Container, capsys):
     app = container[CliApp]
     metrics = container[TunnelMetrics]

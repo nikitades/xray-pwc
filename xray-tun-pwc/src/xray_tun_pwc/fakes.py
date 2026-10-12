@@ -13,6 +13,7 @@ from xray_tun_pwc.app import (
     TunnelMetrics,
     TunnelOptions,
     XrayTunConnect,
+    XrayTunConnectFailed,
 )
 from xray_tun_pwc.domain.entities import SocksTunnel, TunnelCheck, TunnelGroup, VpnConfigLine
 from xray_tun_pwc.domain.sites import Site, SiteCatalog, SiteVisit, SiteVisitError
@@ -24,6 +25,7 @@ class FakeXrayTunConnect(XrayTunConnect):
     broken_tags: frozenset[str] = frozenset()
     started_with: tuple[VpnConfigLine, ...] = ()
     running: bool = False
+    start_error: str = ""
 
     async def version(self) -> Version:
         return Version(self.reported_version)
@@ -32,6 +34,8 @@ class FakeXrayTunConnect(XrayTunConnect):
     async def start(
         self, configs: Sequence[VpnConfigLine], options: TunnelOptions = DEFAULT_TUNNEL_OPTIONS
     ) -> AsyncGenerator[TunnelGroup]:
+        if self.start_error:
+            raise XrayTunConnectFailed(self.start_error)
         self.started_with, self.running = tuple(configs), True
         try:
             yield TunnelGroup(

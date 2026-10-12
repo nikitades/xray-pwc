@@ -3,6 +3,7 @@ package tun
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/netip"
@@ -195,7 +196,9 @@ func TestForwardWithoutDirectStopsAndRepeatsNoTunnels(t *testing.T) {
 	events := runForward(t, opts)
 
 	start := time.Now()
-	waitFor(t, events, kind("no_tunnels"))
+	if e := waitFor(t, events, kind("no_tunnels")); e.Direct != "off" {
+		t.Errorf("no_tunnels direct = %q, want off", e.Direct)
+	}
 	waitFor(t, events, kind("no_tunnels"))
 	if time.Since(start) < opts.NoTunnelsEvery {
 		t.Error("no_tunnels repeats faster than NoTunnelsEvery")
@@ -352,5 +355,14 @@ func TestDNSCheckThroughALink(t *testing.T) {
 	defer cancel()
 	if err := dnsCheck(ctx, socks); err == nil {
 		t.Fatal("dnsCheck passed with no resolver answering")
+	}
+}
+
+func TestNoTunnelsSaysWhyDirectDoesNotServe(t *testing.T) {
+	for _, direct := range []string{"off", "failed"} {
+		kv := Event{Kind: "no_tunnels", Direct: direct}.KV()
+		if got := fmt.Sprint(kv); got != "[usable 0 direct "+direct+"]" {
+			t.Errorf("KV = %s", got)
+		}
 	}
 }

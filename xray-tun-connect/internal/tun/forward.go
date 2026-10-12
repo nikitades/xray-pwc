@@ -44,6 +44,8 @@ type Event struct {
 	To     string
 	Reason string
 	Fails  int
+	// Direct, for no_tunnels: "off" without it, "failed" when it did not start.
+	Direct string
 }
 
 // Level is how much the event matters.
@@ -69,7 +71,7 @@ func (e Event) KV() []any {
 	case "switch":
 		return []any{"from", e.From, "to", e.To, "reason", e.Reason}
 	case "no_tunnels":
-		return []any{"usable", 0, "direct", false}
+		return []any{"usable", 0, "direct", e.Direct}
 	case "link_unusable":
 		return []any{"index", e.Index, "name", e.Name, "fails", e.Fails, "reason", e.Reason}
 	case "link_usable", "active":
@@ -319,7 +321,11 @@ func (f *forwarder) pick(ctx context.Context) {
 	}
 	if time.Since(f.lastNoTunnels) >= f.opts.NoTunnelsEvery {
 		f.lastNoTunnels = time.Now()
-		f.emit(Event{Kind: "no_tunnels"})
+		direct := "off"
+		if f.direct >= 0 {
+			direct = "failed"
+		}
+		f.emit(Event{Kind: "no_tunnels", Direct: direct})
 	}
 }
 
