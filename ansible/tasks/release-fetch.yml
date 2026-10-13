@@ -1,0 +1,73 @@
+---
+# The release bundles for probes.yml, here on the control plane, one per CPU
+# type (fetch_arches). The one fork between the sources:
+#   xray_pwc_release: local   make bundle from this working tree
+#   xray_pwc_release: X.Y.Z   the bundles of GitHub release vX.Y.Z, checked
+#                             against its SHA256SUMS
+# Either way it sets xray_pwc_bundles: {arch: {file, env}}, env being the
+# bundle's release.env; from there on the source does not matter. Only local
+# files change, so it runs in --check too.
+
+- name: Build the bundles from the working tree
+  when: xray_pwc_release == 'local'
+  block:
+    - name: Build them
+      ansible.builtin.command:
+        argv: [make, -s, -C, "{{ playbook_dir }}/..", bundle, "ARCHES={{ fetch_arches | join(' ') }}"]
+      register: fetch_build
+      changed_when: false
+      check_mode: false
+
+    - name: Pick them
+      ansible.builtin.set_fact:
+        fetch_files: >-
+          {{ dict(fetch_arches | zip(fetch_build.stdout_lines | select('match', '^bundle: ')
+             | map('regex_replace', '^bundle: ', playbook_dir ~ '/../'))) }}
+
+- name: Download the published bundles
+  when: xray_pwc_release != 'local'
+  vars:
+    fetch_base: https://github.com/{{ xray_pwc_repo }}/releases/download/v{{ xray_pwc_release }}
+    fetch_dir: "{{ xray_pwc_dist }}/{{ xray_pwc_release }}"
+  block:
+    - name: Create the download directory
+      ansible.builtin.file:
+        path: "{{ fetch_dir }}"
+        state: directory
+        mode: "0755"
+      check_mode: false
+
+    # Kept between runs: a bundle already here is not downloaded again.
+    - name: Download them
+      ansible.builtin.get_url:
+        url: "{{ fetch_base }}/xray-pwc-{{ xray_pwc_release }}-linux-{{ item }}.tar.zst"
+        dest: "{{ fetch_dir }}/xray-pwc-{{ xray_pwc_release }}-linux-{{ item }}.tar.zst"
+        checksum: "sha256:{{ fetch_base }}/SHA256SUMS"
+        mode: "0644"
+      loop: "{{ fetch_arches }}"
+      check_mode: false
+
+    - name: Pick them
+      ansible.builtin.set_fact:
+        fetch_files: >-
+          {{ dict(fetch_arches | zip(fetch_arches
+             | map('regex_replace', '^(.*)$', fetch_dir ~ '/xray-pwc-' ~ xray_pwc_release ~ '-linux-\1.tar.zst'))) }}
+
+# From here on the source does not matter.
+- name: Read the release of each bundle
+  ansible.builtin.command:
+    argv: [tar, --zstd, -xOf, "{{ fetch_files[item] }}", ./release.env]
+  loop: "{{ fetch_arches }}"
+  register: fetch_env
+  changed_when: false
+  check_mode: false
+
+- name: Keep the bundles
+  ansible.builtin.set_fact:
+    xray_pwc_bundles: >-
+      {{ xray_pwc_bundles | default({}) | combine({item.item: {
+           'file': fetch_files[item.item],
+           'env': dict(item.stdout_lines | select('match', '^[A-Z_]+=') | map('split', '=', 1))}}) }}
+  loop: "{{ fetch_env.results }}"
+  loop_control:
+    label: "{{ item.item }}"

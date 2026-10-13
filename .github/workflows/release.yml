@@ -1,0 +1,139 @@
+# A tag vX.Y.Z (equal to VERSION) releases everything at that version:
+#   - GitHub release vX.Y.Z: xray-pwc-connect for Linux and macOS, the
+#     xray-pwc-probe wheel, the bundles Ansible brings to the probes, SHA256SUMS
+#   - ghcr.io/nikitades/xray-pwc-aio:X.Y.Z, X.Y and latest, for amd64 and arm64,
+#     built from those same files
+#   - the tag xray-pwc-connect/vX.Y.Z, for
+#     go install github.com/nikitades/xray-pwc/xray-pwc-connect/cmd/xray-pwc-connect@vX.Y.Z
+name: release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/xray-pwc-aio
+
+jobs:
+  files:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: version
+        name: Check the tag is VERSION
+        run: |
+          version=$(cat VERSION)
+          [ "v$version" = "$GITHUB_REF_NAME" ] || { echo "tag $GITHUB_REF_NAME, VERSION $version"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: xray-pwc-connect/go.mod
+          cache-dependency-path: |
+            xray-pwc-connect/go.sum
+            xray-pwc-aio/aio-net/go.sum
+      - uses: astral-sh/setup-uv@v6
+      - run: make test
+      - run: make connect wheel RELEASE=1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: files
+          path: dist/${{ steps.version.outputs.version }}/
+          if-no-files-found: error
+
+  # One runner per CPU type: Chromium does not install well under emulation.
+  build:
+    needs: files
+    strategy:
+      matrix:
+        include:
+          - { arch: amd64, runner: ubuntu-24.04 }
+          - { arch: arm64, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    env:
+      DIST: dist/${{ needs.files.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
+        with:
+          name: files
+          path: ${{ env.DIST }}
+      # Downloads lose the modes and look older than the sources: make must
+      # take them as built.
+      - run: chmod +x "$DIST"/xray-pwc-connect-* && touch "$DIST"/*
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - run: sudo apt-get install -y --no-install-recommends zstd
+      - run: make bundle RELEASE=1 ARCHES=${{ matrix.arch }}
+      - run: >-
+          make image RELEASE=1 ARCH=${{ matrix.arch }} IMAGE=$IMAGE IMAGE_TAGS=
+          IMAGE_OUTPUT=type=image,name=$IMAGE,push-by-digest=true,name-canonical=true,push=true
+          IMAGE_FLAGS="--metadata-file $RUNNER_TEMP/image.json"
+      - run: |
+          mkdir -p "$RUNNER_TEMP/digests"
+          jq -r '."containerimage.digest"' "$RUNNER_TEMP/image.json" > "$RUNNER_TEMP/digests/${{ matrix.arch }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundle-${{ matrix.arch }}
+          path: ${{ env.DIST }}/xray-pwc-*-linux-${{ matrix.arch }}.tar.zst
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/${{ matrix.arch }}
+
+  publish:
+    needs: [files, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      packages: write
+    env:
+      VERSION: ${{ needs.files.outputs.version }}
+      DIST: dist/${{ needs.files.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
+        with:
+          path: ${{ env.DIST }}
+          pattern: "{files,bundle-*}"
+          merge-multiple: true
+      - uses: actions/download-artifact@v5
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digest-*
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Tag the image
+        run: |
+          docker buildx imagetools create \
+            -t "$IMAGE:$VERSION" -t "$IMAGE:${VERSION%.*}" -t "$IMAGE:latest" \
+            $(for d in "$RUNNER_TEMP"/digests/*; do echo "$IMAGE@$(cat "$d")"; done)
+      - run: make sums RELEASE=1
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd "$DIST"
+          gh release create "v$VERSION" --title "xray-pwc $VERSION" --generate-notes \
+            xray-pwc-*.tar.zst xray-pwc-connect-* xray_pwc_probe-*.whl SHA256SUMS
+      - name: Tag the Go module
+        run: |
+          git tag "xray-pwc-connect/v$VERSION" "$GITHUB_SHA"
+          git push origin "xray-pwc-connect/v$VERSION"

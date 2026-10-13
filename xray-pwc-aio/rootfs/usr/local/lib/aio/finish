@@ -1,10 +1,11 @@
 #!/bin/bash
-# finish <service> <exit code> <signal>: run by s6 when a service stops.
-# A stop on request is normal: killed by TERM/INT (code 256), or a script that
-# traps TERM and exits 0. Anything else is logged.
+# finish <service> <exit code> <signal>: run by s6, as root, when a service
+# stops. A stop on request is normal: killed by TERM/INT (code 256), or a
+# script that traps TERM and exits 0. Anything else is logged.
 svc=$1 code=$2 sig=$3
 if [[ $svc == wg ]]; then
-	/usr/bin/wg-quick down /app/state/wg/vpnc-net.conf >/dev/null 2>&1 || true
+	# The interface outlives the script, and wireguard-go goes with it.
+	/usr/local/bin/aio-net del xray-pwc-net >/dev/null 2>&1 || true
 fi
 if [[ $code == 0 || ( $code == 256 && ( $sig == 15 || $sig == 2 ) ) ]]; then
 	exit 0
@@ -13,5 +14,5 @@ if [[ $code == 256 ]]; then
 	echo "WARN service_exit service=$svc signal=$sig"
 else
 	echo "WARN service_exit service=$svc code=$code"
-fi | /usr/local/bin/aio-log s6
+fi | s6-setuidgid abc /usr/local/bin/aio-log s6
 exit 0

@@ -1,0 +1,6 @@
+#!/bin/bash
+# SSH for Ansible and admins: abc with a key, only from the xray-pwc-net
+# server, which is the bastion (ssh -J). Not root: it serves abc alone.
+. "$(dirname "$0")/common.sh"
+[[ -f $STATE/ssh/ssh_host_ed25519_key ]] || idle "no host key"
+exec /usr/sbin/sshd -D -e -f "$(dirname "$0")/sshd_config" -o "AllowUsers=abc@${AIO_SERVER_IP:?}"

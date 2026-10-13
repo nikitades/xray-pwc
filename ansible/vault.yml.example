@@ -4,4 +4,4 @@
 
 vault_grafana_admin_password: "CHANGE-ME"
 
-# vpnc-net keys are not here: vpnc-net-join.yml writes them to host_vars/<name>/vpnc-net.yml.
+# xray-pwc-net keys are not here: xray-pwc-net-join.yml writes them to host_vars/<name>/xray-pwc-net.yml.

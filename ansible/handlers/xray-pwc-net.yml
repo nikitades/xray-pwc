@@ -1,0 +1,13 @@
+---
+# Handlers for tasks/xray-pwc-net.yml.
+- name: Reload systemd
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+
+# wg syncconf: new and removed peers, the interface stays up. A new address or
+# port needs: systemctl restart wg-quick@xray-pwc-net, then the monitoring stack.
+- name: Reload xray-pwc-net
+  ansible.builtin.systemd_service:
+    name: wg-quick@{{ pwc_net_interface }}
+    state: reloaded
+  when: not ansible_check_mode

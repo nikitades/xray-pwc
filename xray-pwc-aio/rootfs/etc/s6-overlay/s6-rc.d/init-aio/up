@@ -1,1 +1,1 @@
-with-contenv /usr/local/bin/aio-run entrypoint /usr/local/bin/python3 /usr/local/lib/aio/bootstrap.py
+with-contenv bash -o pipefail -c "/usr/local/bin/python3 /usr/local/lib/aio/bootstrap.py 2>&1 | /usr/local/bin/aio-log entrypoint"

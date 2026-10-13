@@ -1,0 +1,72 @@
+---
+# The xray-pwc-net server on the monitoring host: wg-quick@xray-pwc-net with the kernel's
+# WireGuard, a peer for every member, and the CoreDNS names. The playbook imports
+# handlers/xray-pwc-net.yml. A reload applies new peers without taking the interface down.
+
+- name: Check xray-pwc-net settings
+  ansible.builtin.assert:
+    that:
+      - pwc_net_ip is defined
+      - pwc_net_private_key | default('') | length > 0
+    fail_msg: "{{ inventory_hostname }} has no host_vars/{{ inventory_hostname }}/xray-pwc-net.yml (xray-pwc-net-join.yml -e name={{ inventory_hostname }})"
+    quiet: true
+
+# iptables for the rule in PostUp: a bare Debian 13 has only nftables.
+- name: Install WireGuard tools
+  ansible.builtin.apt:
+    name: [wireguard-tools, iptables]
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Template xray-pwc-net config
+  ansible.builtin.template:
+    src: templates/xray-pwc-net/server.conf.j2
+    dest: /etc/wireguard/{{ pwc_net_interface }}.conf
+    mode: "0600"
+  no_log: true
+  notify: Reload xray-pwc-net
+
+- name: Ensure xray-pwc-net is running
+  ansible.builtin.systemd_service:
+    name: wg-quick@{{ pwc_net_interface }}
+    state: started
+    enabled: true
+  when: not ansible_check_mode
+
+- name: Create docker drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/docker.service.d
+    state: directory
+    mode: "0755"
+
+# Containers publish ports on the xray-pwc-net address, so it must exist before they start.
+- name: Start docker after xray-pwc-net
+  ansible.builtin.copy:
+    content: |
+      [Unit]
+      Wants=wg-quick@{{ pwc_net_interface }}.service
+      After=wg-quick@{{ pwc_net_interface }}.service
+    dest: /etc/systemd/system/docker.service.d/xray-pwc-net.conf
+    mode: "0644"
+  notify: Reload systemd
+
+- name: Create coredns directory
+  ansible.builtin.file:
+    path: "{{ monitoring_dir }}/coredns"
+    state: directory
+    mode: "0755"
+
+# CoreDNS rereads both files itself, no restart needed.
+- name: Template coredns config
+  ansible.builtin.template:
+    src: templates/monitoring/{{ item.src }}
+    dest: "{{ monitoring_dir }}/coredns/{{ item.dest }}"
+    mode: "0644"
+  loop:
+    - { src: Corefile.j2, dest: Corefile }
+    - { src: xray-pwc-net.hosts.j2, dest: xray-pwc-net.hosts }
+
+# The monitoring stack binds to the xray-pwc-net address.
+- name: Flush handlers
+  ansible.builtin.meta: flush_handlers

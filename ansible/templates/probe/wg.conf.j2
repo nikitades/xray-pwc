@@ -1,18 +1,17 @@
 # {{ ansible_managed }}
-# Only {{ vpnc_net_subnet }} goes through the tunnel: no default route, no DNS.
+# For wg setconf: keys and the peer only. The address ({{ pwc_net_ip }}/32), the MTU
+# and the route to {{ pwc_net_subnet }} come from aio.env: no default route, no DNS.
 [Interface]
-PrivateKey = {{ vpnc_net_private_key }}
-Address = {{ vpnc_net_ip }}/32
-MTU = {{ vpnc_net_mtu }}
+PrivateKey = {{ pwc_net_private_key }}
 
 [Peer]
-# {{ vpnc_net_server }}
-PublicKey = {{ hostvars[vpnc_net_server].vpnc_net_public_key }}
-{% if vpnc_net_via %}
-# Through the service links: xtc-forward sends this port on to {{ vpnc_net_endpoint }}.
-Endpoint = 127.0.0.1:{{ vpnc_net_via_port }}
+# {{ pwc_net_server }}
+PublicKey = {{ hostvars[pwc_net_server].pwc_net_public_key }}
+{% if pwc_net_via %}
+# Through the service links: connect-forward sends this port on to {{ pwc_net_endpoint }}.
+Endpoint = 127.0.0.1:{{ pwc_net_via_port }}
 {% else %}
-Endpoint = {{ vpnc_net_endpoint }}
+Endpoint = {{ pwc_net_endpoint }}
 {% endif %}
-AllowedIPs = {{ vpnc_net_subnet }}
-PersistentKeepalive = {{ vpnc_net_keepalive }}
+AllowedIPs = {{ pwc_net_subnet }}
+PersistentKeepalive = {{ pwc_net_keepalive }}

@@ -16,9 +16,9 @@ func TestCopyLinesStampsAndAppends(t *testing.T) {
 	}
 	at := time.Date(2026, 10, 12, 15, 41, 23, 500_000_000, time.FixedZone("x", 3600))
 	var out bytes.Buffer
-	copyLines(strings.NewReader("INFO start a=1\nWARN no newline"), &out, file, "pwc", func() time.Time { return at })
+	copyLines(strings.NewReader("INFO start a=1\nWARN no newline"), &out, file, "probe", func() time.Time { return at })
 
-	want := "2026-10-12T14:41:23.500Z pwc INFO start a=1\n2026-10-12T14:41:23.500Z pwc WARN no newline\n"
+	want := "2026-10-12T14:41:23.500Z probe INFO start a=1\n2026-10-12T14:41:23.500Z probe WARN no newline\n"
 	if out.String() != want {
 		t.Errorf("stdout = %q, want %q", out.String(), want)
 	}

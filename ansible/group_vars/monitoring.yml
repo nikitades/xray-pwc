@@ -5,7 +5,7 @@ prom_image: prom/prometheus:v3.15.0
 grafana_image: grafana/grafana:13.2.2
 coredns_image: coredns/coredns:1.12.1
 
-# Grafana: loopback only, Caddy faces the internet. Prometheus: loopback and the vpnc-net address.
+# Grafana: loopback only, Caddy faces the internet. Prometheus: loopback and the xray-pwc-net address.
 prom_port: 9090
 grafana_port: 3000
 

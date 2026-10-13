@@ -1,0 +1,158 @@
+---
+# Adds a machine to xray-pwc-net.
+#   a probe:      ansible-playbook xray-pwc-net-join.yml -e name=<name>
+#   the server:   ansible-playbook xray-pwc-net-join.yml -e name=<the monitoring host>
+# Writes host_vars/<name>/xray-pwc-net.yml (address and keys). For a probe it also writes
+# inventory.d/<name>.yml and files/probes/<name>/ with empty links.txt and
+# service_links.txt, unless they are there, tells the server, and makes
+# files/xray-pwc-net/join/<name>/compose.yml: the probe's container with its join token,
+# to start on the machine with `docker compose up -d`, and next-steps.txt.
+# With outbound_access_policy: vpn, the token has the links of service_links.txt.
+# For the xray-pwc-net server (the monitoring host) it only writes the keys:
+# monitoring.yml sets the server up.
+# Running it again for the same name keeps the address and the keys.
+
+- name: Register the xray-pwc-net member
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    join_dir: "{{ playbook_dir }}/host_vars/{{ name }}"
+    # Every address in host_vars counts, also of a member that is out of the
+    # inventory for now (commented out): it keeps its address for later.
+    join_used_ips: "{{ join_known_ips.stdout_lines | map('split') | map('last') | list }}"
+    join_prefix: "{{ pwc_net_subnet.split('/')[0].rsplit('.', 1)[0] }}"
+    # The server is .1; the rest get the first free address from .10.
+    join_ip: "{{ join_prefix ~ '.1' if name == pwc_net_server else range(10, 255) | map('string') | map('regex_replace', '^', join_prefix ~ '.') | reject('in', join_used_ips) | first }}"
+
+  tasks:
+    - name: Check parameters
+      ansible.builtin.assert:
+        that:
+          - name | default('') is match('^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$')
+        fail_msg: >-
+          -e name=<name>. A name is a DNS label: lowercase letters, digits and dashes.
+          It becomes the probe's hostname and <name>.{{ pwc_net_domain }}.
+        quiet: true
+
+    - name: Find used addresses
+      ansible.builtin.shell: grep -h '^pwc_net_ip:' {{ playbook_dir }}/host_vars/*/xray-pwc-net.yml || true
+      register: join_known_ips
+      changed_when: false
+      check_mode: false
+
+    - name: Find member settings
+      ansible.builtin.stat:
+        path: "{{ join_dir }}/xray-pwc-net.yml"
+      register: join_member
+
+    - name: Pick address and keys
+      when: not join_member.stat.exists
+      block:
+        # Raw X25519 keys in base64, the WireGuard format: the last 32 bytes of the DER.
+        - name: Generate key pair
+          ansible.builtin.shell: |
+            set -euo pipefail
+            der=$(openssl genpkey -algorithm X25519 -outform DER | base64)
+            echo "$der" | base64 -d | tail -c 32 | base64
+            echo "$der" | base64 -d | openssl pkey -inform DER -pubout -outform DER | tail -c 32 | base64
+          args:
+            executable: /bin/bash
+          register: join_keys
+          changed_when: true
+          # Only prints them: with --check the settings are shown, not written.
+          check_mode: false
+          no_log: true
+
+        - name: Create host_vars directory
+          ansible.builtin.file:
+            path: "{{ join_dir }}"
+            state: directory
+            mode: "0700"
+
+        - name: Write member settings
+          ansible.builtin.template:
+            src: templates/xray-pwc-net/member.yml.j2
+            dest: "{{ join_dir }}/xray-pwc-net.yml"
+            mode: "0600"
+          no_log: true
+
+    - name: Add to inventory
+      ansible.builtin.template:
+        src: templates/xray-pwc-net/inventory.yml.j2
+        dest: "{{ playbook_dir }}/inventory.d/{{ name }}.yml"
+        mode: "0644"
+      when: name not in groups['all']
+
+    - name: Reload inventory
+      ansible.builtin.meta: refresh_inventory
+
+    # Empty files, to be filled in; existing ones are kept.
+    - name: Create link files
+      when: name != pwc_net_server
+      block:
+        - name: Create links directory
+          ansible.builtin.file:
+            path: "{{ playbook_dir }}/files/probes/{{ name }}"
+            state: directory
+            mode: "0700"
+
+        - name: Create empty link files
+          ansible.builtin.copy:
+            content: ""
+            dest: "{{ playbook_dir }}/files/probes/{{ name }}/{{ item }}"
+            mode: "0600"
+            force: false
+          loop: [links.txt, service_links.txt]
+
+# Not for the server itself: monitoring.yml does that.
+- name: Tell the xray-pwc-net server
+  hosts: "{{ 'monitoring' if name != groups.monitoring[0] else 'none' }}"
+  become: true
+
+  handlers:
+    - name: Xray-pwc-net handlers
+      ansible.builtin.import_tasks: handlers/xray-pwc-net.yml
+
+  tasks:
+    - name: Xray-pwc-net tunnel
+      ansible.builtin.import_tasks: tasks/xray-pwc-net.yml
+
+- name: Make the compose file
+  hosts: "{{ name }}"
+  gather_facts: false
+  vars:
+    pwc_net_join_server: "{{ inventory_hostname == pwc_net_server }}"
+    pwc_net_join_compose: "{{ pwc_net_join_dir }}/{{ inventory_hostname }}/compose.yml"
+  tasks:
+    - name: Outbound access policy
+      ansible.builtin.include_tasks: tasks/outbound-policy.yml
+      when: not pwc_net_join_server
+
+    - name: Create join directory
+      ansible.builtin.file:
+        path: "{{ pwc_net_join_dir }}/{{ inventory_hostname }}"
+        state: directory
+        mode: "0700"
+      delegate_to: localhost
+      when: not pwc_net_join_server
+
+    - name: Write compose file
+      ansible.builtin.template:
+        src: templates/probe/compose.yml.j2
+        dest: "{{ pwc_net_join_compose }}"
+        mode: "0600"
+      no_log: true
+      delegate_to: localhost
+      when: not pwc_net_join_server
+
+    - name: Write next steps
+      ansible.builtin.template:
+        src: templates/xray-pwc-net/join-note.txt.j2
+        dest: "{{ pwc_net_join_dir }}/{{ inventory_hostname ~ ('.txt' if pwc_net_join_server else '/next-steps.txt') }}"
+        mode: "0600"
+      delegate_to: localhost
+
+    - name: Show next steps
+      ansible.builtin.debug:
+        msg: "{{ lookup('template', 'templates/xray-pwc-net/join-note.txt.j2').splitlines() }}"

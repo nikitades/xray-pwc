@@ -1,0 +1,48 @@
+#!/bin/bash
+# The xray-pwc-net interface, from /app/state/wg/xray-pwc-net.conf (wg setconf
+# format) and the address, subnet and MTU in aio.env. The kernel's WireGuard
+# when the host has it, otherwise wireguard-go. Not wg-quick: it wants root.
+# aio-net, wg and wireguard-go carry cap_net_admin in the image. While up, it logs
+# when the handshake with the server goes stale and comes back.
+. "$(dirname "$0")/common.sh"
+conf=$STATE/wg/$IFACE.conf
+[[ -f $conf ]] || idle "no $conf"
+
+# Left over from a crash.
+aio-net del "$IFACE" || true
+if aio-net add "$IFACE" 2>/dev/null; then
+	impl=kernel
+elif out=$(wireguard-go "$IFACE" 2>&1); then
+	impl=wireguard-go
+else
+	say ERROR up_failed err="$(quoted "$(tail -n 3 <<<"$out" | tr '\n' ' ')")"
+	exec sleep 30
+fi
+# wg resolves the endpoint's name now: wait for DNS, as wg-quick would.
+until out=$(wg setconf "$IFACE" "$conf" 2>&1); do
+	say WARN setconf_failed err="$(quoted "$out")"
+	sleep 10
+done
+if ! out=$(aio-net up "$IFACE" "$AIO_IP/32" "$AIO_MTU" "$AIO_SUBNET" 2>&1); then
+	say ERROR up_failed err="$(quoted "$out")"
+	exec sleep 30
+fi
+say INFO up iface="$IFACE" address="$AIO_IP" \
+	endpoint="$(wg show "$IFACE" endpoints | awk '{print $2}')" impl=$impl
+
+trap 'exit 0' TERM INT
+# ok/lost changes are logged; a new interface gets $stale seconds for the first one.
+stale=180 state=new started=$(date +%s)
+while sleep 30 & wait $!; do
+	last=$(wg show "$IFACE" latest-handshakes 2>/dev/null | awk 'NR == 1 { print $2 }')
+	[[ -n $last ]] || { say ERROR interface_gone iface="$IFACE"; exit 1; }
+	now=$(date +%s)
+	if (( last > 0 && now - last < stale )); then
+		[[ $state == ok ]] || say INFO handshake_ok age=$(( now - last ))s
+		state=ok
+	elif [[ $state == ok ]] || [[ $state == new && $(( now - started )) -ge $stale ]]; then
+		if (( last == 0 )); then age=never; else age=$(( now - last ))s; fi
+		say WARN handshake_lost age=$age
+		state=lost
+	fi
+done

@@ -1,5 +1,5 @@
 ---
-- name: Central monitoring server (Prometheus + Grafana + Caddy + the vpnc-net server)
+- name: Central monitoring server (Prometheus + Grafana + Caddy + the xray-pwc-net server)
   hosts: monitoring
   become: true
   vars_files:
@@ -15,8 +15,8 @@
         quiet: true
 
   handlers:
-    - name: Vpnc-net handlers
-      ansible.builtin.import_tasks: handlers/vpnc-net.yml
+    - name: Xray-pwc-net handlers
+      ansible.builtin.import_tasks: handlers/xray-pwc-net.yml
 
     - name: Restart docker
       ansible.builtin.systemd_service:
@@ -39,10 +39,10 @@
     - name: Docker
       ansible.builtin.import_tasks: tasks/docker.yml
 
-    # Before the stack: it publishes ports on the vpnc-net address. Also writes
-    # the CoreDNS config, so vpnc-net-join.yml can add a member on its own.
-    - name: Vpnc-net tunnel
-      ansible.builtin.import_tasks: tasks/vpnc-net.yml
+    # Before the stack: it publishes ports on the xray-pwc-net address. Also writes
+    # the CoreDNS config, so xray-pwc-net-join.yml can add a member on its own.
+    - name: Xray-pwc-net tunnel
+      ansible.builtin.import_tasks: tasks/xray-pwc-net.yml
 
     - name: Create directories
       ansible.builtin.file:

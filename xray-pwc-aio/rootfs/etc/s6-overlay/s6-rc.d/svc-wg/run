@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/local/bin/aio-run wg /usr/local/lib/aio/wg
+exec /usr/local/bin/aio-run wg

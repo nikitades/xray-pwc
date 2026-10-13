@@ -1,8 +1,0 @@
----
-# Written by vpnc-net-join.yml. Ansible reaches the probe's container through
-# vpnc-net (group_vars/probes.yml).
-all:
-  children:
-    probes:
-      hosts:
-        {{ name }}:

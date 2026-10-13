@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/local/bin/aio-run sshd /usr/local/lib/aio/sshd
+exec /usr/local/bin/aio-run sshd

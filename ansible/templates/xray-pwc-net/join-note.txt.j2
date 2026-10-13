@@ -1,0 +1,16 @@
+{% if pwc_net_join_server %}
+{{ inventory_hostname }} is the xray-pwc-net server ({{ pwc_net_ip }}): ansible-playbook monitoring.yml sets it up.
+{% else %}
+{{ inventory_hostname }} ({{ pwc_net_ip }}) is in xray-pwc-net. Its compose file:
+
+  {{ pwc_net_join_compose }}
+
+It is private: PWC_JOIN holds the probe's key. {{ 'The tunnel goes through the service links (outbound_access_policy: vpn).' if pwc_net_via else 'The tunnel goes straight to ' ~ pwc_net_endpoint ~ ' over UDP (outbound_access_policy: ' ~ outbound_access_policy ~ '). If the network blocks UDP, set outbound_access_policy: vpn for the probe in the inventory, put links into files/probes/' ~ inventory_hostname ~ '/service_links.txt and run this again before the first start: a probe whose tunnel never comes up cannot be reached to change it.' }}
+
+1. On the machine (Linux, macOS or Windows with Docker), in a folder of its own:
+     docker compose up -d
+     docker compose logs -f          # "wg INFO handshake_ok": it is in
+2. Here: put the links to check into files/probes/{{ inventory_hostname }}/links.txt, then
+     ansible-playbook probes.yml --limit {{ inventory_hostname }}
+3. Delete compose.yml here once it runs there; the machine keeps its own copy.
+{% endif %}

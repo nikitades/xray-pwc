@@ -1,7 +1,0 @@
-#!/bin/bash
-# SSH for Ansible and admins: root with a key, only from the vpnc-net server,
-# which is the bastion (ssh -J).
-. /usr/local/lib/aio/common.sh
-[[ -f $STATE/ssh/ssh_host_ed25519_key ]] || idle "no host key"
-mkdir -p /run/sshd
-exec /usr/sbin/sshd -D -e -f /usr/local/lib/aio/sshd_config -o "AllowUsers=root@${AIO_SERVER_IP:?}"

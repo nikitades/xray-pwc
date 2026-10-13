@@ -1,7 +1,15 @@
 #!/bin/bash
-# aio-run <service> <command...>: runs the command with its output, stdout and
-# stderr, going through aio-log: time and service in front, into the log file.
+# aio-run <service>: run by s6 as root, for one service of the container.
+# Lets abc read and control the service (s6-svc from Ansible), then runs the
+# service's script from the current release as abc, its output going through
+# aio-log: time and service in front, into /app/logs/aio.log. The image only
+# holds this; what a service does is the release's (/app/current/services).
 svc=$1
-shift
-exec > >(exec /usr/local/bin/aio-log "$svc") 2>&1
-exec "$@"
+s6-svperms -g abc -O abc "$PWD" >/dev/null 2>&1 || true
+exec > >(exec s6-setuidgid abc /usr/local/bin/aio-log "$svc") 2>&1
+script=/app/current/services/$svc
+if [[ ! -x $script ]]; then
+	echo "INFO idle reason=\"no release in /app/current\""
+	exec sleep 300
+fi
+exec s6-setuidgid abc "$script"

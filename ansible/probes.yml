@@ -1,10 +1,10 @@
 ---
-# The probes: Ansible works inside each probe's xray-pwc-aio container, through
-# vpnc-net and the bastion. It delivers the code (a release) and the tools,
-# writes the state (links, tunnel, Alloy, relay) and restarts what changed.
-# With the tunnel down, probes-host.yml rewrites the tunnel's part from the host.
-# The container itself is started on its host from the compose.yml of
-# vpnc-net-join.yml.
+# The probes: Ansible works inside each probe's xray-pwc-aio container, as abc,
+# through xray-pwc-net and the bastion. It brings the release (xray_pwc_release:
+# a published one, or "local" from this working tree), the tools that release
+# needs, writes the state (links, tunnel, Alloy, relay) and restarts what
+# changed. The container itself is started on its host from the compose.yml of
+# xray-pwc-net-join.yml; the host is never touched from here.
 - name: VPN probes (xray-pwc-aio)
   hosts: probes
   gather_facts: false
@@ -29,22 +29,20 @@
         gather_subset: [min]
 
   handlers:
-    # A restart of xtc-forward or of the tunnel cuts this very connection for a
-    # moment: s6-svc only signals, and the next task waits for the connection.
-    - name: Restart xtc-forward
-      ansible.builtin.command: s6-svc -r /run/service/svc-xtc-forward
-      notify: Wait for vpnc-net
+    # A restart of connect-forward or of the tunnel cuts this very connection
+    # for a moment: s6-svc only signals, and the next task waits for it.
+    - name: Restart connect-forward
+      ansible.builtin.command: s6-svc -r /run/service/svc-connect-forward
+      notify: Wait for xray-pwc-net
 
-    # New peer settings without taking the interface down. A new address or MTU
-    # needs: s6-svc -r /run/service/svc-wg
-    - name: Sync vpnc-net
-      ansible.builtin.shell: wg syncconf vpnc-net <(wg-quick strip /app/state/wg/vpnc-net.conf)
-      args:
-        executable: /bin/bash
-      notify: Wait for vpnc-net
+    # New peer settings without taking the interface down. A new address or
+    # MTU needs: s6-svc -r /run/service/svc-wg
+    - name: Sync xray-pwc-net
+      ansible.builtin.command: wg syncconf xray-pwc-net /app/state/wg/xray-pwc-net.conf
+      notify: Wait for xray-pwc-net
 
-    - name: Restart pwc
-      ansible.builtin.command: s6-svc -r /run/service/svc-pwc
+    - name: Restart probe
+      ansible.builtin.command: s6-svc -r /run/service/svc-probe
 
     - name: Restart alloy
       ansible.builtin.command: s6-svc -r /run/service/svc-alloy
@@ -55,7 +53,11 @@
     - name: Restart sshd
       ansible.builtin.command: s6-svc -r /run/service/svc-sshd
 
-    - name: Wait for vpnc-net
+    - name: Restart wg
+      ansible.builtin.command: s6-svc -r /run/service/svc-wg
+      notify: Wait for xray-pwc-net
+
+    - name: Wait for xray-pwc-net
       ansible.builtin.wait_for_connection:
         delay: 5
         timeout: 120
@@ -65,95 +67,88 @@
       ansible.builtin.set_fact:
         aio_arch: "{{ {'x86_64': 'amd64', 'aarch64': 'arm64'}[ansible_facts['architecture']] }}"
 
-    - name: Check the image version
+    - name: Read the image version
       ansible.builtin.slurp:
         src: /etc/aio-version
-      register: aio_image_version
+      register: aio_image_slurp
 
-    - name: Warn about an old image
-      ansible.builtin.debug:
-        msg: >-
-          The container runs xray-pwc-aio {{ aio_image_version.content | b64decode | trim }},
-          the repository has {{ aio_image | split(':') | last }}: on the probe's host, set
-          image: {{ aio_image }} in compose.yml, then docker compose up -d.
-      when: aio_image_version.content | b64decode | trim != aio_image | split(':') | last
+    - name: Read the image's Playwright
+      ansible.builtin.slurp:
+        src: /etc/aio-playwright-version
+      register: aio_image_playwright
 
-    # The release name: a hash of what goes into it. Same code, same name, nothing rebuilt or resent.
-    - name: Hash release sources
-      ansible.builtin.shell: >-
-        set -o pipefail;
-        git ls-files -co --exclude-standard -z -- xray-tun-pwc xray-tun-connect xray-pwc-aio/Dockerfile
-        | xargs -0 cat
-        | python3 -c 'import hashlib, sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest()[:12])'
-      args:
-        chdir: "{{ playbook_dir }}/.."
-        executable: /bin/bash
+    - name: Fetch the bundles
+      ansible.builtin.include_tasks:
+        file: tasks/release-fetch.yml
+        apply:
+          delegate_to: localhost
+          run_once: true
+      vars:
+        fetch_arches: "{{ ansible_play_hosts | map('extract', hostvars, 'aio_arch') | unique | sort }}"
+
+    - name: Pick the bundle
+      ansible.builtin.set_fact:
+        aio_bundle: "{{ xray_pwc_bundles[aio_arch] }}"
+        aio_release: "{{ xray_pwc_bundles[aio_arch].env.VERSION }}"
+        aio_image_version_now: "{{ aio_image_slurp.content | b64decode | trim }}"
+
+    # A release that needs a newer image cannot reach the probe over
+    # xray-pwc-net: only its host can start the new image.
+    - name: Check the image is new enough
+      ansible.builtin.assert:
+        that:
+          - aio_image_version_now | regex_replace('-.*$', '') is version(aio_bundle.env.MIN_IMAGE, '>=', version_type='semver')
+        fail_msg: >-
+          {{ aio_release }} needs the image {{ aio_bundle.env.MIN_IMAGE }} or newer, and
+          {{ inventory_hostname }} runs {{ aio_image_version_now }}. Its host's owner sets
+          image: {{ aio_image }} in compose.yml and runs docker compose up -d there.
+        quiet: true
+
+    - name: Deliver the release
+      ansible.builtin.include_tasks: tasks/aio-package.yml
+      vars:
+        package: { src: "{{ aio_bundle.file }}", dest: "/app/releases/{{ aio_release }}" }
+      when: not ansible_check_mode
+
+    # The tools of this release that the image lacks, here in Ansible's /app/opt.
+    - name: Find the tools
+      ansible.builtin.stat:
+        path: "{{ item.image }}"
+      loop:
+        - { tool: alloy, version: "{{ aio_bundle.env.ALLOY_VERSION }}", image: "/opt/alloy-{{ aio_bundle.env.ALLOY_VERSION }}" }
+        - { tool: caddy, version: "{{ aio_bundle.env.CADDY_VERSION }}", image: "/opt/caddy-{{ aio_bundle.env.CADDY_VERSION }}" }
+      loop_control:
+        label: "{{ item.tool }} {{ item.version }}"
+      register: aio_tools_found
+
+    - name: Pick the missing tools
+      ansible.builtin.set_fact:
+        aio_missing_tools: >-
+          {{ aio_tools_found.results | rejectattr('stat.exists') | map(attribute='item')
+             | map('combine', {'arch': aio_arch}) | list
+             + ([{'tool': 'chromium', 'version': aio_bundle.env.PLAYWRIGHT_VERSION, 'arch': aio_arch}]
+                if aio_image_playwright.content | b64decode | trim != aio_bundle.env.PLAYWRIGHT_VERSION else []) }}
+
+    - name: Build the missing tools
+      ansible.builtin.command:
+        argv: [make, -s, -C, "{{ playbook_dir }}/..", tool, "TOOL={{ item.tool }}", "TOOL_VERSION={{ item.version }}", "ARCH={{ item.arch }}"]
+      loop: "{{ ansible_play_hosts | map('extract', hostvars, 'aio_missing_tools') | flatten | unique }}"
+      loop_control:
+        label: "{{ item.tool }} {{ item.version }} {{ item.arch }}"
       delegate_to: localhost
       run_once: true
-      register: aio_release_hash
       changed_when: false
-      check_mode: false
-
-    - name: Pick the release
-      ansible.builtin.set_fact:
-        aio_release: "{{ aio_release_hash.stdout }}"
-
-    - name: Build packages locally
-      ansible.builtin.include_tasks: tasks/aio-build.yml
-      run_once: true
-      vars:
-        aio_build_arch: "{{ arch }}"
-      loop: "{{ ansible_play_hosts | map('extract', hostvars, 'aio_arch') | unique }}"
-      loop_control:
-        loop_var: arch
       when: not ansible_check_mode
 
-    - name: Deliver packages
+    - name: Deliver the missing tools
       ansible.builtin.include_tasks: tasks/aio-package.yml
-      loop:
-        - { file: "release-{{ aio_release }}-{{ aio_arch }}.tar.zst", dest: "/app/releases/{{ aio_release }}" }
-        - { file: "alloy-{{ aio_alloy_version }}-{{ aio_arch }}.tar.zst", dest: "/app/opt/alloy-{{ aio_alloy_version }}" }
-        - { file: "caddy-{{ aio_caddy_version }}-{{ aio_arch }}.tar.zst", dest: "/app/opt/caddy-{{ aio_caddy_version }}" }
+      vars:
+        package:
+          src: "{{ xray_pwc_dist }}/tools/{{ item.tool }}-{{ item.version }}-linux-{{ item.arch }}.tar.zst"
+          dest: "/app/opt/{{ 'ms-playwright' if item.tool == 'chromium' else item.tool }}-{{ item.version }}"
+      loop: "{{ aio_missing_tools }}"
       loop_control:
-        loop_var: package
-        label: "{{ package.dest }}"
-      when: not ansible_check_mode
-
-    - name: Link the tools into the release
-      ansible.builtin.file:
-        src: "{{ item.src }}"
-        dest: /app/releases/{{ aio_release }}/bin/{{ item.name }}
-        state: link
-        force: true
-      loop:
-        - { name: alloy, src: "/app/opt/alloy-{{ aio_alloy_version }}/alloy" }
-        - { name: caddy, src: "/app/opt/caddy-{{ aio_caddy_version }}/caddy" }
-      when: not ansible_check_mode
-
-    # The image has Chromium for its own Playwright. A release with another one
-    # gets its browser in the volume, and says where in browsers-path.
-    - name: Find the release's Playwright
-      ansible.builtin.shell: >-
-        /app/releases/{{ aio_release }}/venv/bin/python -c
-        'import importlib.metadata as m; print(m.version("playwright"))';
-        cat /etc/aio-playwright-version
-      register: aio_playwright
-      changed_when: false
-      when: not ansible_check_mode
-
-    - name: Install the release's browser
-      ansible.builtin.command: /app/releases/{{ aio_release }}/venv/bin/python -m playwright install --only-shell chromium
-      environment:
-        PLAYWRIGHT_BROWSERS_PATH: /app/opt/ms-playwright
-      register: aio_browser
-      changed_when: aio_browser.stdout is search('downloaded')
-      when: not ansible_check_mode and aio_playwright.stdout_lines | unique | length > 1
-
-    - name: Point the release at its browser
-      ansible.builtin.copy:
-        content: "{{ '/app/opt/ms-playwright' if aio_playwright.stdout_lines | unique | length > 1 else '/ms-playwright' }}\n"
-        dest: /app/releases/{{ aio_release }}/browsers-path
-        mode: "0644"
+        label: "{{ item.tool }} {{ item.version }}"
       when: not ansible_check_mode
 
     - name: Create state directories
@@ -168,47 +163,44 @@
         src: templates/probe/aio.env.j2
         dest: /app/state/aio.env
         mode: "0644"
-      notify: [Restart xtc-forward, Restart relay, Restart sshd]
+      notify: [Restart wg, Restart connect-forward, Restart relay, Restart sshd]
 
     - name: Write service links
       ansible.builtin.copy:
-        content: "{{ vpnc_net_via_links }}"
+        content: "{{ pwc_net_via_links }}"
         dest: /app/state/service_links.txt
         mode: "0600"
       no_log: true
-      notify: Restart xtc-forward
+      notify: Restart connect-forward
 
-    - name: Template vpnc-net config
+    - name: Template xray-pwc-net config
       ansible.builtin.template:
         src: templates/probe/wg.conf.j2
-        dest: /app/state/wg/vpnc-net.conf
+        dest: /app/state/wg/xray-pwc-net.conf
         mode: "0600"
       no_log: true
-      notify: Sync vpnc-net
+      notify: Sync xray-pwc-net
 
     - name: Write SSH keys
       ansible.builtin.copy:
-        src: "{{ vpnc_net_ssh_public_key | expanduser }}"
+        src: "{{ pwc_net_ssh_public_key | expanduser }}"
         dest: /app/state/ssh/authorized_keys
         mode: "0600"
 
-    # The checker runs as abc.
     - name: Write share links
       ansible.builtin.copy:
         content: "{{ probe_links | join('\n') }}\n"
         dest: /app/state/links.txt
-        owner: root
-        group: abc
-        mode: "0640"
+        mode: "0600"
       no_log: true
-      notify: Restart pwc
+      notify: Restart probe
 
     - name: Write checker settings
       ansible.builtin.template:
-        src: templates/probe/pwc.env.j2
-        dest: /app/state/pwc.env
+        src: templates/probe/probe.env.j2
+        dest: /app/state/probe.env
         mode: "0644"
-      notify: Restart pwc
+      notify: Restart probe
 
     - name: Template alloy config
       ansible.builtin.template:
@@ -244,11 +236,11 @@
         echo switched
       register: aio_switch
       changed_when: "'switched' in aio_switch.stdout"
-      notify: [Restart pwc, Restart alloy, Restart relay, Restart xtc-forward]
+      notify: [Restart probe, Restart alloy, Restart relay, Restart sshd, Restart connect-forward, Restart wg]
       when: not ansible_check_mode
 
-    # The current release and the one before stay, for a rollback; tools no
-    # release links to go.
+    # The current release and the one before stay, for a rollback; tools that
+    # no kept release needs go.
     - name: Remove old releases
       ansible.builtin.shell: |
         set -eu
@@ -259,10 +251,12 @@
           echo "INFO release_removed release=$old" | aio-log deploy >/dev/null
           echo "removed $old"
         done
-        used=$(for r in /app/releases/*/bin; do readlink "$r/alloy" "$r/caddy" || true; done | xargs -rn1 dirname | sort -u)
-        for tool in /app/opt/alloy-* /app/opt/caddy-*; do
+        needed=$(for r in /app/releases/*/release.env; do
+          ( . "$r"; echo "alloy-$ALLOY_VERSION"; echo "caddy-$CADDY_VERSION"; echo "ms-playwright-$PLAYWRIGHT_VERSION" )
+        done | sort -u)
+        for tool in /app/opt/*; do
           [ -d "$tool" ] || continue
-          grep -qxF "$tool" <<<"$used" || { rm -rf "$tool"; echo "removed $tool"; }
+          grep -qxF "$(basename "$tool")" <<<"$needed" || { rm -rf "$tool"; echo "removed $tool"; }
         done
       args:
         executable: /bin/bash

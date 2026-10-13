@@ -1,59 +1,58 @@
 ---
 # A probe is one container, xray-pwc-aio, started on its host from the compose.yml
-# that vpnc-net-join.yml makes. Ansible works inside it, as root of the container,
-# through vpnc-net and the bastion.
-ansible_host: "{{ vpnc_net_ip }}"
-ansible_user: root
-ansible_ssh_private_key_file: "{{ vpnc_net_ssh_public_key | regex_replace('\\.pub$', '') }}"
-ansible_ssh_common_args: "{{ vpnc_net_ssh_args }}"
+# that xray-pwc-net-join.yml makes. Ansible works inside it, as abc, the user every
+# service of the container runs as, through xray-pwc-net and the bastion.
+ansible_host: "{{ pwc_net_ip }}"
+ansible_port: 2222
+ansible_user: abc
+ansible_ssh_private_key_file: "{{ pwc_net_ssh_public_key | regex_replace('\\.pub$', '') }}"
+ansible_ssh_common_args: "{{ pwc_net_ssh_args }}"
 ansible_python_interpreter: /usr/local/bin/python3
 
-# The image: the wrapper, rebuilt rarely and published to a registry
-# (xray-pwc-aio/README.md). Its tag is xray-pwc-aio/VERSION. A fork that changes
-# the image publishes its own and sets aio_image_name in inventory.yml.
-aio_source_dir: "{{ playbook_dir }}/../xray-pwc-aio"
-aio_image: "{{ aio_image_name | default('ghcr.io/nikitades/xray-pwc-aio') }}:{{ lookup('file', aio_source_dir ~ '/VERSION') }}"
-
-# What Ansible delivers into the container, built here from xray-pwc-aio/Dockerfile:
-# the release (the checker and xray-tun-connect, named by a hash of their sources) and
-# Alloy and Caddy, named by their versions. Kept here between runs, in files/aio/.
-aio_package_dir: "{{ playbook_dir }}/files/aio"
-aio_alloy_version: v1.20.0
-aio_caddy_version: 2.11.7
+# What the probes run: a published release (vX.Y.Z on GitHub), or "local", a
+# bundle built here from this working tree (make bundle), for a try before a
+# release. probes.yml brings it either way; nothing is downloaded on a probe.
+xray_pwc_release: "{{ lookup('file', playbook_dir ~ '/../VERSION') }}"
+xray_pwc_repo: nikitades/xray-pwc
+# Bundles and tools here, between runs.
+xray_pwc_dist: "{{ playbook_dir }}/../dist"
 # Releases kept on a probe: the current one and the one before, for a rollback.
 aio_keep_releases: 2
+
+# The image a new probe starts from, in compose.yml. The tag is a published
+# release: with xray_pwc_release: local, the repository's VERSION. A fork that
+# changes the image publishes its own and sets aio_image_name in inventory.yml.
+aio_image_version: "{{ lookup('file', playbook_dir ~ '/../VERSION') if xray_pwc_release == 'local' else xray_pwc_release }}"
+aio_image: "{{ aio_image_name | default('ghcr.io/nikitades/xray-pwc-aio') }}:{{ aio_image_version }}"
 
 # /app/state/aio.env, read by the services of the container.
 aio_env:
   AIO_NODE: "{{ inventory_hostname }}"
-  AIO_IP: "{{ vpnc_net_ip }}"
-  AIO_SERVER_IP: "{{ vpnc_net_server_ip }}"
-  AIO_FORWARD: "{{ vpnc_net_endpoint }}"
-  AIO_VIA_PORT: "{{ vpnc_net_via_port }}"
+  AIO_IP: "{{ pwc_net_ip }}"
+  AIO_SERVER_IP: "{{ pwc_net_server_ip }}"
+  AIO_SUBNET: "{{ pwc_net_subnet }}"
+  AIO_MTU: "{{ pwc_net_mtu }}"
+  AIO_FORWARD: "{{ pwc_net_endpoint }}"
+  AIO_VIA_PORT: "{{ pwc_net_via_port }}"
   AIO_RELAY: "{{ aio_relay | bool | lower }}"
 
 # The join token in compose.yml: what the container turns into /app/state on its
 # first start. The same values and templates as probes.yml, so Ansible later finds
-# nothing to change.
-vpnc_net_join_data:
-  v: 1
+# nothing to change. v: the format bootstrap.py reads.
+pwc_net_join_data:
+  v: 2
   node: "{{ inventory_hostname }}"
   aio_env: "{{ lookup('template', 'templates/probe/aio.env.j2') }}"
   wg_conf: "{{ lookup('template', 'templates/probe/wg.conf.j2') }}"
-  service_links: "{{ vpnc_net_via_links }}"
-  authorized_keys: "{{ lookup('file', vpnc_net_ssh_public_key | expanduser) }}\n"
-vpnc_net_join_token: "{{ vpnc_net_join_data | to_json | b64encode | replace('+', '-') | replace('/', '_') | regex_replace('=+$', '') }}"
-
-# The probe's host, for probes-host.yml and probes-clean.yml: set probe_host (and
-# probe_host_user, probe_host_port if needed) in the inventory. The container's
-# folder there: compose.yml, state/, logs/.
-probe_host_dir: xray-pwc-aio
+  service_links: "{{ pwc_net_via_links }}"
+  authorized_keys: "{{ lookup('file', pwc_net_ssh_public_key | expanduser) }}\n"
+pwc_net_join_token: "{{ pwc_net_join_data | to_json | b64encode | replace('+', '-') | replace('/', '_') | regex_replace('=+$', '') }}"
 
 pwc_check_interval: PT5M
 pwc_check_jitter: PT2M
 
 # files/probes/<hostname>/*: share links, one per line; all files are joined into one links.txt.
-# service_links.txt is not one of them: it is for the probe's own traffic (vpnc_net_service_links).
+# service_links.txt is not one of them: it is for the probe's own traffic (pwc_net_service_links).
 probe_link_files: "{{ query('fileglob', 'probes/' ~ inventory_hostname ~ '/*') | reject('search', '/service_links\\.txt$') | sort }}"
 # The links themselves: no blank lines or comments. probes.yml stops if there are none.
 probe_links: "{{ query('file', *probe_link_files) | join('\n') | split('\n') | map('trim') | reject('match', '^(#|$)') | list }}"
@@ -62,20 +61,20 @@ probe_links: "{{ query('file', *probe_link_files) | join('\n') | split('\n') | m
 # default. Part of compose.yml: a change needs the container recreated on its host.
 probe_dns: []
 
-# How the probe's own traffic (vpnc-net, and the metrics inside it) leaves its
+# How the probe's own traffic (xray-pwc-net, and the metrics inside it) leaves its
 # network. Set it per probe in the inventory:
-#   plain  vpnc-net straight to the server over UDP; Alloy sends over one
+#   plain  xray-pwc-net straight to the server over UDP; Alloy sends over one
 #          connection, 2000 samples per batch.
 #   relay  the same tunnel, and Alloy sends through a local Caddy: a new
 #          connection for every batch of 200 samples. For a probe where Alloy's
 #          one long connection keeps stalling ("Failed to send batch" in the log).
 #          It hides nothing: the network sees only the WireGuard UDP either way.
-#   vpn    vpnc-net through the links in files/probes/<probe>/service_links.txt,
+#   vpn    xray-pwc-net through the links in files/probes/<probe>/service_links.txt,
 #          for networks that block UDP to the server; Alloy as with plain.
 outbound_access_policy: plain
 outbound_access_policies: [plain, relay, vpn]
 aio_relay: "{{ outbound_access_policy == 'relay' }}"
 
-# Alloy sends to Prometheus on the server's vpnc-net address.
-prom_remote_write_upstream: "http://{{ vpnc_net_server_ip }}:{{ hostvars[vpnc_net_server].prom_port | default(9090) }}"
+# Alloy sends to Prometheus on the server's xray-pwc-net address.
+prom_remote_write_upstream: "http://{{ pwc_net_server_ip }}:{{ hostvars[pwc_net_server].prom_port | default(9090) }}"
 prom_remote_write_max_samples: "{{ 200 if aio_relay else 2000 }}"

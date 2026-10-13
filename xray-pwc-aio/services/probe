@@ -1,0 +1,12 @@
+#!/bin/bash
+# The checker, xray-pwc-probe, with the links from Ansible.
+. "$(dirname "$0")/common.sh"
+has_links "$STATE/links.txt" || idle "no links in $STATE/links.txt"
+set -a
+# shellcheck source=/dev/null
+[[ -f $STATE/probe.env ]] && . "$STATE/probe.env"
+set +a
+export PWC_CONFIG_PATH=$STATE/links.txt PWC_INSTANCE=$AIO_NODE \
+	PWC_CONNECT_BIN=$CURRENT/bin/xray-pwc-connect PLAYWRIGHT_BROWSERS_PATH=$(browsers) \
+	PYTHONUNBUFFERED=1 HOME=/tmp
+exec "$CURRENT/venv/bin/xray-pwc-probe"

@@ -1,0 +1,19 @@
+# {{ ansible_managed }}
+# wg-quick@{{ pwc_net_interface }}. Peers reach only this host: traffic between them is
+# dropped. Names in {{ pwc_net_domain }} go to CoreDNS on {{ pwc_net_ip }}, for this
+# host too, so `ssh -J` through it finds the probes by name.
+[Interface]
+PrivateKey = {{ pwc_net_private_key }}
+Address = {{ pwc_net_ip }}/{{ pwc_net_subnet.split('/')[1] }}
+ListenPort = {{ pwc_net_port }}
+MTU = {{ pwc_net_mtu }}
+PostUp = iptables -I FORWARD -i %i -o %i -j DROP
+PostUp = resolvectl dns %i {{ pwc_net_ip }}; resolvectl domain %i '~{{ pwc_net_domain }}'; resolvectl default-route %i false
+PostDown = iptables -D FORWARD -i %i -o %i -j DROP
+{% for host in pwc_net_members if host != inventory_hostname %}
+
+[Peer]
+# {{ host }}
+PublicKey = {{ hostvars[host].pwc_net_public_key }}
+AllowedIPs = {{ hostvars[host].pwc_net_ip }}/32
+{% endfor %}

@@ -1,0 +1,10 @@
+#!/bin/bash
+# Carries xray-pwc-net through the service links: WireGuard's endpoint is
+# 127.0.0.1:$AIO_VIA_PORT, and xray-pwc-connect forwards it to the server
+# through the first usable link. Without links, WireGuard goes straight.
+. "$(dirname "$0")/common.sh"
+links=$STATE/service_links.txt
+has_links "$links" || idle "no service links: xray-pwc-net goes straight to the server" 86400
+# From a file, not a pipe: on a pipe xray-pwc-connect stops at end of input.
+exec "$CURRENT/bin/xray-pwc-connect" -stdin-links -forward "$AIO_FORWARD" -listen 127.0.0.1 \
+	-start-port "$AIO_VIA_PORT" -xray-log-level none <"$links"

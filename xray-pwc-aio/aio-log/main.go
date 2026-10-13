@@ -1,7 +1,7 @@
 // Command aio-log puts the time and a service name in front of every line it
 // reads, and appends the lines to the shared log file and to stdout:
 //
-//	2026-10-12T15:41:23.500Z xtc-forward WARN link_unusable index=0 ...
+//	2026-10-12T15:41:23.500Z connect-forward WARN link_unusable index=0 ...
 //
 // Every service of the container runs with its output piped through it:
 //

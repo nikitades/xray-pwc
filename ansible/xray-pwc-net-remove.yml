@@ -1,0 +1,53 @@
+---
+# Removes a member from xray-pwc-net: forgets its address, keys and compose file here
+# and tells the server. Its links in files/probes/<name>/ stay: yours to delete.
+# The probe's container stays on its host until its owner runs, in the folder of
+# compose.yml there: docker compose down -v --rmi all
+#   ansible-playbook xray-pwc-net-remove.yml -e name=<name>
+- name: Forget the xray-pwc-net member
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  tasks:
+    - name: Check parameters
+      ansible.builtin.assert:
+        that:
+          - name | default('') | length > 0
+          - name != pwc_net_server
+        fail_msg: -e name=<name>; the xray-pwc-net server cannot be removed
+        quiet: true
+
+    - name: Find inventory.d entry
+      ansible.builtin.stat:
+        path: "{{ playbook_dir }}/inventory.d/{{ name }}.yml"
+      register: remove_entry
+
+    - name: Remove member files
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ playbook_dir }}/host_vars/{{ name }}"
+        - "{{ playbook_dir }}/inventory.d/{{ name }}.yml"
+        - "{{ pwc_net_join_dir }}/{{ name }}"
+
+    - name: Reload inventory
+      ansible.builtin.meta: refresh_inventory
+
+    - name: Report inventory.yml entry
+      ansible.builtin.debug:
+        msg: "{{ name }} is still in inventory.yml: remove it there by hand."
+      when: name in groups['all'] and not remove_entry.stat.exists
+
+- name: Tell the xray-pwc-net server
+  hosts: monitoring
+  become: true
+
+  handlers:
+    - name: Xray-pwc-net handlers
+      ansible.builtin.import_tasks: handlers/xray-pwc-net.yml
+
+  tasks:
+    - name: Xray-pwc-net tunnel
+      ansible.builtin.import_tasks: tasks/xray-pwc-net.yml

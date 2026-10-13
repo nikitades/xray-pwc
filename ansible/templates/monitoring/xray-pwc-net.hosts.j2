@@ -1,0 +1,5 @@
+# {{ ansible_managed }}
+{{ pwc_net_ip }} {{ inventory_hostname }}.{{ pwc_net_domain }} prom.{{ pwc_net_domain }}
+{% for host in pwc_net_members if host != inventory_hostname %}
+{{ hostvars[host].pwc_net_ip }} {{ host }}.{{ pwc_net_domain }}
+{% endfor %}

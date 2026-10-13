@@ -1,9 +1,0 @@
-#!/bin/bash
-# Grafana Alloy: the checker's and the host's metrics to Prometheus.
-. /usr/local/lib/aio/common.sh
-bin=$(release_bin alloy)
-[[ -n $bin ]] || idle "no release yet: run probes.yml"
-[[ -f $STATE/alloy/config.alloy ]] || idle "no $STATE/alloy/config.alloy"
-mkdir -p "$STATE/alloy/data"
-exec "$bin" run "$STATE/alloy/config.alloy" --storage.path="$STATE/alloy/data" \
-	--server.http.listen-addr=127.0.0.1:12345 --disable-reporting

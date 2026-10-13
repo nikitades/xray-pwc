@@ -1,0 +1,10 @@
+#!/bin/bash
+# Caddy between Alloy and Prometheus, a new connection per request: only with
+# AIO_RELAY=true (outbound_access_policy: relay).
+. "$(dirname "$0")/common.sh"
+[[ ${AIO_RELAY:-false} == true ]] || idle "relay is off" 86400
+bin=$(tool caddy)
+[[ -n $bin ]] || idle "no caddy $CADDY_VERSION: run probes.yml"
+[[ -f $STATE/relay/Caddyfile ]] || idle "no $STATE/relay/Caddyfile"
+export HOME=$STATE/relay XDG_DATA_HOME=$STATE/relay XDG_CONFIG_HOME=$STATE/relay
+exec "$bin" run --config "$STATE/relay/Caddyfile" --adapter caddyfile

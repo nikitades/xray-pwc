@@ -33,14 +33,14 @@ prometheus.scrape "node" {
   scrape_interval = "30s"
 }
 
-// honor_labels: keep the instance label set by xray-tun-pwc (the probe's name), not
+// honor_labels: keep the instance label set by xray-pwc-probe (the probe's name), not
 // the target address.
-prometheus.scrape "xray_tun_pwc" {
+prometheus.scrape "xray_pwc_probe" {
   targets = [
     {"__address__" = "127.0.0.1:8000"},
   ]
   forward_to      = [prometheus.remote_write.central.receiver]
-  job_name        = "xray-tun-pwc"
+  job_name        = "xray-pwc-probe"
   honor_labels    = true
   scrape_interval = "30s"
 }

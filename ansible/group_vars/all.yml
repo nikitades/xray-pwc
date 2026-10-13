@@ -13,40 +13,40 @@ metrics_backlog: 8h
 # Docker Hub mirrors, for networks where Docker Hub is blocked. Example: ["https://mirror.gcr.io"]
 docker_registry_mirrors: []
 
-# vpnc-net: a private WireGuard network. The server is the monitoring host, the probes
+# xray-pwc-net: a private WireGuard network. The server is the monitoring host, the probes
 # are clients, and the probes reach only the server: it drops traffic between peers.
-# Only vpnc_net_subnet goes into the tunnel. Every member has host_vars/<name>/vpnc-net.yml
-# with vpnc_net_ip and its keys, written by vpnc-net-join.yml.
-vpnc_net_interface: vpnc-net
-# A /24: vpnc-net-join.yml hands out .1 to the server and .10 to .254 to the rest.
-vpnc_net_subnet: 10.213.97.0/24
-vpnc_net_port: 51973
+# Only pwc_net_subnet goes into the tunnel. Every member has host_vars/<name>/xray-pwc-net.yml
+# with pwc_net_ip and its keys, written by xray-pwc-net-join.yml.
+pwc_net_interface: xray-pwc-net
+# A /24: xray-pwc-net-join.yml hands out .1 to the server and .10 to .254 to the rest.
+pwc_net_subnet: 10.213.97.0/24
+pwc_net_port: 51973
 # Low enough for a tunnel inside another VPN.
-vpnc_net_mtu: 1280
-vpnc_net_keepalive: 25
-vpnc_net_domain: vpnc-net.internal
-vpnc_net_server: "{{ groups.monitoring[0] }}"
-vpnc_net_server_ip: "{{ hostvars[vpnc_net_server].vpnc_net_ip }}"
-vpnc_net_endpoint: "{{ caddy_grafana_domain }}:{{ vpnc_net_port }}"
-vpnc_net_members: "{{ groups['all'] | map('extract', hostvars) | selectattr('vpnc_net_ip', 'defined') | map(attribute='inventory_hostname') | list }}"
+pwc_net_mtu: 1280
+pwc_net_keepalive: 25
+pwc_net_domain: xray-pwc-net.internal
+pwc_net_server: "{{ groups.monitoring[0] }}"
+pwc_net_server_ip: "{{ hostvars[pwc_net_server].pwc_net_ip }}"
+pwc_net_endpoint: "{{ caddy_grafana_domain }}:{{ pwc_net_port }}"
+pwc_net_members: "{{ groups['all'] | map('extract', hostvars) | selectattr('pwc_net_ip', 'defined') | map(attribute='inventory_hostname') | list }}"
 
 # SSH to the probes goes through the server, the bastion: ssh -J. The public key
-# vpnc_net_ssh_key is put on every probe; set it in inventory.yml (not defaulted here:
+# pwc_net_ssh_key is put on every probe; set it in inventory.yml (not defaulted here:
 # this file would override all.vars from the inventory).
-vpnc_net_ssh_public_key: "{{ vpnc_net_ssh_key | default('~/.ssh/id_ed25519.pub') }}"
-vpnc_net_bastion: "{{ hostvars[vpnc_net_server].ansible_user | default('root') }}@{{ hostvars[vpnc_net_server].ansible_host | default(vpnc_net_server) }}"
+pwc_net_ssh_public_key: "{{ pwc_net_ssh_key | default('~/.ssh/id_ed25519.pub') }}"
+pwc_net_bastion: "{{ hostvars[pwc_net_server].ansible_user | default('root') }}@{{ hostvars[pwc_net_server].ansible_host | default(pwc_net_server) }}"
 # Host keys of the probes are trusted on first use: the tunnel already proves who is there.
-vpnc_net_ssh_args: -o ProxyJump={{ vpnc_net_bastion }} -o StrictHostKeyChecking=accept-new
+pwc_net_ssh_args: -o ProxyJump={{ pwc_net_bastion }} -o StrictHostKeyChecking=accept-new
 
 # files/probes/<host>/service_links.txt: share links for the probe's own traffic, one
 # per line, apart from the links it reports on. With outbound_access_policy: vpn
 # (group_vars/probes.yml), the tunnel goes to the server through the first usable one,
 # for networks that block UDP to it. With the other policies the file is not used.
-vpnc_net_service_links: "{{ playbook_dir }}/files/probes/{{ inventory_hostname }}/service_links.txt"
-# The links as xray-tun-connect reads them: one per line, no blank lines or comments.
-vpnc_net_via_lines: "{{ lookup('file', vpnc_net_service_links).splitlines() | map('trim') | reject('match', '^(#|$)') | list if vpnc_net_service_links is file else [] }}"
-vpnc_net_via: "{{ inventory_hostname != vpnc_net_server and outbound_access_policy | default('plain') == 'vpn' }}"
-vpnc_net_via_links: "{{ (vpnc_net_via_lines | join('\n') ~ '\n') if vpnc_net_via and vpnc_net_via_lines else '' }}"
-vpnc_net_via_port: 51974
-# Join files (compose.yml with the token) from vpnc-net-join.yml.
-vpnc_net_join_dir: "{{ playbook_dir }}/files/vpnc-net/join"
+pwc_net_service_links: "{{ playbook_dir }}/files/probes/{{ inventory_hostname }}/service_links.txt"
+# The links as xray-pwc-connect reads them: one per line, no blank lines or comments.
+pwc_net_via_lines: "{{ lookup('file', pwc_net_service_links).splitlines() | map('trim') | reject('match', '^(#|$)') | list if pwc_net_service_links is file else [] }}"
+pwc_net_via: "{{ inventory_hostname != pwc_net_server and outbound_access_policy | default('plain') == 'vpn' }}"
+pwc_net_via_links: "{{ (pwc_net_via_lines | join('\n') ~ '\n') if pwc_net_via and pwc_net_via_lines else '' }}"
+pwc_net_via_port: 51974
+# Join files (compose.yml with the token) from xray-pwc-net-join.yml.
+pwc_net_join_dir: "{{ playbook_dir }}/files/xray-pwc-net/join"

@@ -1,0 +1,110 @@
+---
+# ONE-TIME: moves a deployment of the old layout (vpnc-net, a root container with
+# ./state and ./logs on the host) to xray-pwc 1.1.0, then goes away. Needs the
+# image of the release published (tag v1.1.0) and, this once, SSH to the probes'
+# hosts: probe_host, probe_host_user, probe_host_port in the inventory. After
+# it, delete this file and those settings.
+#   ansible-playbook migrate-1.1.yml
+#
+# 1. The server: the old wg-quick@vpnc-net and its files go, monitoring.yml makes
+#    xray-pwc-net with the same keys, address and port, and the stack restarts on it.
+# 2. Each probe's host: the old container goes with its volume, image, state and
+#    log; the new compose.yml (the 1.1.0 image, the v2 token with the same keys)
+#    comes up in the same folder.
+# 3. probes.yml, as usual, through the new tunnel.
+
+- name: Remove the old vpnc-net server
+  hosts: monitoring
+  become: true
+  tasks:
+    - name: Stop the old tunnel
+      ansible.builtin.systemd_service:
+        name: wg-quick@vpnc-net
+        state: stopped
+        enabled: false
+      failed_when: false
+
+    - name: Remove the old files
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/wireguard/vpnc-net.conf
+        - /etc/systemd/system/docker.service.d/vpnc-net.conf
+        - "{{ monitoring_dir }}/coredns/vpnc-net.hosts"
+
+    - name: Reload systemd
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+
+- name: The new server
+  ansible.builtin.import_playbook: monitoring.yml
+
+- name: Restart the stack on the new tunnel
+  hosts: monitoring
+  become: true
+  tasks:
+    # Prometheus and CoreDNS listen on the tunnel's address, which went away
+    # with the old interface.
+    - name: Restart the monitoring stack
+      community.docker.docker_compose_v2:
+        project_src: "{{ monitoring_dir }}"
+        state: restarted
+
+- name: Replace the old probe containers
+  hosts: probes
+  gather_facts: false
+  vars:
+    ansible_host: "{{ probe_host }}"
+    ansible_user: "{{ probe_host_user | default(omit) }}"
+    ansible_port: "{{ probe_host_port | default(22) }}"
+    ansible_ssh_common_args: ""
+    ansible_python_interpreter: auto_silent
+  tasks:
+    - name: Check the host is known
+      ansible.builtin.assert:
+        that: probe_host is defined
+        fail_msg: "no probe_host for {{ inventory_hostname }}, migrate it by hand with its owner"
+        quiet: true
+
+    - name: Outbound access policy
+      ansible.builtin.import_tasks: tasks/outbound-policy.yml
+
+    - name: Find the folder
+      ansible.builtin.command: printenv HOME
+      register: migrate_home
+      changed_when: false
+
+    - name: Take the old container down
+      ansible.builtin.command: docker compose down -v --rmi all --remove-orphans
+      args:
+        chdir: "{{ migrate_home.stdout }}/xray-pwc-aio"
+      become: true
+      register: migrate_down
+      changed_when: true
+      failed_when: migrate_down.rc != 0 and 'no configuration file' not in migrate_down.stderr
+
+    # Written by root in the old container.
+    - name: Remove the old state and log
+      ansible.builtin.file:
+        path: "{{ migrate_home.stdout }}/xray-pwc-aio/{{ item }}"
+        state: absent
+      loop: [state, logs]
+      become: true
+
+    - name: Write the new compose file
+      ansible.builtin.template:
+        src: templates/probe/compose.yml.j2
+        dest: "{{ migrate_home.stdout }}/xray-pwc-aio/compose.yml"
+        mode: "0600"
+      no_log: true
+
+    - name: Bring up the new container
+      ansible.builtin.command: docker compose up -d --pull missing
+      args:
+        chdir: "{{ migrate_home.stdout }}/xray-pwc-aio"
+      become: true
+      changed_when: true
+
+- name: The probes through the new tunnel
+  ansible.builtin.import_playbook: probes.yml

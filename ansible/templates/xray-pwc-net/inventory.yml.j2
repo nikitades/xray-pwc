@@ -1,0 +1,8 @@
+---
+# Written by xray-pwc-net-join.yml. Ansible reaches the probe's container through
+# xray-pwc-net (group_vars/probes.yml).
+all:
+  children:
+    probes:
+      hosts:
+        {{ name }}:

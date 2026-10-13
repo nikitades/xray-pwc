@@ -1,0 +1,43 @@
+[project]
+name = "xray-pwc-probe"
+version = "1.1.0"
+description = "Checks Xray VPN links with realistic browser traffic and exports Prometheus metrics"
+readme = "README.md"
+license = "MIT"
+authors = [
+    { name = "Nikita Pavlovsky", email = "nikita@visible.xyz" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "attrs>=26.1.0",
+    "lagom>=2.7.7",
+    "playwright>=1.63.0",
+    "prometheus-client>=0.26.0",
+    "pydantic>=2",
+    "pydantic-settings>=2.15.0",
+]
+
+[project.scripts]
+xray-pwc-probe = "xray_pwc_probe:main"
+
+[build-system]
+requires = ["uv_build>=0.12.5,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+source-exclude = ["**/*_test.py", "**/conftest.py"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.16.10",
+]
+
+[tool.ruff]
+line-length = 100
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["src"]
+python_files = ["*_test.py"]

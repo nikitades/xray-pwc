@@ -6,7 +6,7 @@
     that:
       - probe_relay is not defined
       - outbound_access_policy in outbound_access_policies
-      - outbound_access_policy != 'vpn' or vpnc_net_via_lines | length > 0
+      - outbound_access_policy != 'vpn' or pwc_net_via_lines | length > 0
     fail_msg: >-
       {{ 'probe_relay is gone: set outbound_access_policy: relay (or plain) for ' ~ inventory_hostname ~ ' instead'
          if probe_relay is defined else
