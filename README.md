@@ -1,5 +1,17 @@
 # xray-pwc
 
+## One sentence explanation
+
+A piece of software to have one, several or even an entire fleet of XRay VPN monitoring probes.
+
+## Killer feature
+
+The setup is very simple. You just need to run a single docker container, that's it. It's called AIO, or all-in-one.
+
+<picture>
+
+## About
+
 xray-pwc shows whether your VPN configs (aka links) really work for people in a given
 network, for example a home internet provider in one city. You put a small
 machine, a *probe*, into that network. Every few minutes the probe opens real
