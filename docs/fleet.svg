@@ -17,6 +17,7 @@
     text { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; fill: var(--text); }
     .mono, .mono text { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
     .muted { fill: var(--muted); }
+    .flavor { font-style: italic; }
     .h { font-weight: 600; }
     .card { fill: var(--card); stroke: var(--line); stroke-width: 1.5; }
     .zone { fill: var(--zone); stroke: var(--line); stroke-width: 1.5; stroke-dasharray: 6 6; }
@@ -50,17 +51,17 @@
   <g>
     <path class="pipe" stroke-width="12" d="M438 320 C640 320 700 520 880 520"/>
     <path class="flow" d="M438 320 C640 320 700 520 880 520"/>
-    <path class="pipe" stroke-width="7" d="M756 88 C820 88 820 470 880 470"/>
-    <path class="flow" d="M756 88 C820 88 820 470 880 470"/>
-    <path class="pipe" stroke-width="7" d="M756 208 C820 208 820 495 880 495"/>
-    <path class="flow" d="M756 208 C820 208 820 495 880 495"/>
-    <path class="pipe" stroke-width="7" d="M756 588 C820 588 800 580 880 580"/>
-    <path class="flow" d="M756 588 C820 588 800 580 880 580"/>
+    <path class="pipe" stroke-width="7" d="M770 84 C830 84 830 470 880 470"/>
+    <path class="flow" d="M770 84 C830 84 830 470 880 470"/>
+    <path class="pipe" stroke-width="7" d="M770 216 C830 216 830 495 880 495"/>
+    <path class="flow" d="M770 216 C830 216 830 495 880 495"/>
+    <path class="pipe" stroke-width="7" d="M770 588 C830 588 820 580 880 580"/>
+    <path class="flow" d="M770 588 C830 588 820 580 880 580"/>
   </g>
-  <text x="474" y="292" font-size="14" class="h" style="fill: var(--flow)">WireGuard inside xray</text>
-  <text x="474" y="310" font-size="12.5" class="muted">looks like HTTPS · outbound only</text>
-  <text x="540" y="454" font-size="12.5" class="muted">→ metrics to Prometheus</text>
-  <text x="540" y="472" font-size="12.5" class="muted">← releases from Ansible</text>
+  <text x="466" y="432" font-size="14" class="h" style="fill: var(--flow)">WireGuard inside xray</text>
+  <text x="466" y="450" font-size="12.5" class="muted">looks like HTTPS · outbound only</text>
+  <text x="466" y="478" font-size="12.5" class="muted">→ metrics to Prometheus</text>
+  <text x="466" y="496" font-size="12.5" class="muted">← releases from Ansible</text>
 
   <!-- The probe in focus -->
   <rect class="zone" x="24" y="150" width="430" height="476" rx="16"/>
@@ -114,36 +115,43 @@
 
   <!-- More probes, the same -->
   <g>
-    <rect class="card" x="500" y="40" width="256" height="96" rx="12"/>
+    <rect class="card" x="500" y="24" width="270" height="120" rx="12"/>
     <g class="ico">
-      <rect x="518" y="60" width="40" height="52" rx="5"/>
-      <path d="M526 74 h24 M526 86 h24 M526 98 h24"/>
+      <rect x="518" y="58" width="40" height="52" rx="5"/>
+      <path d="M526 72 h24 M526 84 h24 M526 96 h24"/>
     </g>
-    <text x="574" y="70" font-size="13" class="h mono">lisbon-nas</text>
-    <text x="574" y="88" font-size="12" class="muted">a NAS · Lisbon</text>
-    <rect class="box" x="574" y="100" width="110" height="22" rx="5" stroke-width="1.5"/>
-    <text x="629" y="115" font-size="11" class="mono" text-anchor="middle">xray-pwc-aio</text>
+    <text x="574" y="50" font-size="13" class="h mono">lisbon-nas</text>
+    <text x="574" y="68" font-size="12" class="muted">Synology DS218+</text>
+    <text x="574" y="84" font-size="12" class="muted">Lisbon</text>
+    <text x="574" y="100" font-size="12" class="muted flavor">mostly family photos</text>
+    <rect class="box" x="574" y="112" width="110" height="22" rx="5" stroke-width="1.5"/>
+    <text x="629" y="127" font-size="11" class="mono" text-anchor="middle">xray-pwc-aio</text>
   </g>
   <g>
-    <rect class="card" x="500" y="160" width="256" height="96" rx="12"/>
-    <rect x="514" y="190" width="50" height="36" rx="4" style="fill: none; stroke: var(--pi); stroke-width: 2"/>
-    <rect x="522" y="200" width="14" height="14" rx="2" style="fill: var(--pi)"/>
-    <path d="M542 202 h14 M542 210 h14 M518 222 h42" style="stroke: var(--pi); stroke-width: 2; stroke-dasharray: 2 3"/>
-    <text x="574" y="190" font-size="13" class="h mono">elder-rylanor</text>
-    <text x="574" y="208" font-size="12" class="muted">Raspberry Pi · Saint-Petersburg</text>
-    <rect class="box" x="574" y="220" width="110" height="22" rx="5" stroke-width="1.5"/>
-    <text x="629" y="235" font-size="11" class="mono" text-anchor="middle">xray-pwc-aio</text>
+    <rect class="card" x="500" y="156" width="270" height="120" rx="12"/>
+    <g class="ico">
+      <rect x="516" y="194" width="46" height="32" rx="3"/>
+      <path d="M508 230 h62 l-6 8 h-50 z"/>
+    </g>
+    <text x="574" y="182" font-size="13" class="h mono">elder-rylanor</text>
+    <text x="574" y="200" font-size="12" class="muted">HP Pavilion dv7-6b01er laptop</text>
+    <text x="574" y="216" font-size="12" class="muted">Saint-Petersburg</text>
+    <text x="574" y="232" font-size="12" class="muted flavor">15 years of honorable service</text>
+    <rect class="box" x="574" y="244" width="110" height="22" rx="5" stroke-width="1.5"/>
+    <text x="629" y="259" font-size="11" class="mono" text-anchor="middle">xray-pwc-aio</text>
   </g>
   <g>
-    <rect class="card" x="500" y="540" width="256" height="96" rx="12"/>
+    <rect class="card" x="500" y="528" width="270" height="120" rx="12"/>
     <g class="ico">
-      <rect x="514" y="562" width="50" height="34" rx="4"/>
-      <path d="M539 596 v10 M528 610 h22"/>
+      <rect x="514" y="564" width="50" height="34" rx="4"/>
+      <path d="M539 598 v10 M528 612 h22"/>
     </g>
-    <text x="574" y="570" font-size="13" class="h mono">almaty-pc</text>
-    <text x="574" y="588" font-size="12" class="muted">Windows PC · Almaty</text>
-    <rect class="box" x="574" y="600" width="110" height="22" rx="5" stroke-width="1.5"/>
-    <text x="629" y="615" font-size="11" class="mono" text-anchor="middle">xray-pwc-aio</text>
+    <text x="574" y="554" font-size="13" class="h mono">almaty-pc</text>
+    <text x="574" y="572" font-size="12" class="muted">Windows 11 gaming PC</text>
+    <text x="574" y="588" font-size="12" class="muted">Almaty</text>
+    <text x="574" y="604" font-size="12" class="muted flavor">probes while nobody plays</text>
+    <rect class="box" x="574" y="616" width="110" height="22" rx="5" stroke-width="1.5"/>
+    <text x="629" y="631" font-size="11" class="mono" text-anchor="middle">xray-pwc-aio</text>
   </g>
 
   <!-- Dashboard -->
