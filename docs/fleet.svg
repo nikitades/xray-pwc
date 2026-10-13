@@ -50,12 +50,12 @@
   <g>
     <path class="pipe" stroke-width="12" d="M438 320 C640 320 700 520 880 520"/>
     <path class="flow" d="M438 320 C640 320 700 520 880 520"/>
-    <path class="pipe" stroke-width="7" d="M714 88 C820 88 820 470 880 470"/>
-    <path class="flow" d="M714 88 C820 88 820 470 880 470"/>
-    <path class="pipe" stroke-width="7" d="M714 208 C800 208 820 495 880 495"/>
-    <path class="flow" d="M714 208 C800 208 820 495 880 495"/>
-    <path class="pipe" stroke-width="7" d="M714 588 C800 588 800 580 880 580"/>
-    <path class="flow" d="M714 588 C800 588 800 580 880 580"/>
+    <path class="pipe" stroke-width="7" d="M756 88 C820 88 820 470 880 470"/>
+    <path class="flow" d="M756 88 C820 88 820 470 880 470"/>
+    <path class="pipe" stroke-width="7" d="M756 208 C820 208 820 495 880 495"/>
+    <path class="flow" d="M756 208 C820 208 820 495 880 495"/>
+    <path class="pipe" stroke-width="7" d="M756 588 C820 588 800 580 880 580"/>
+    <path class="flow" d="M756 588 C820 588 800 580 880 580"/>
   </g>
   <text x="474" y="292" font-size="14" class="h" style="fill: var(--flow)">WireGuard inside xray</text>
   <text x="474" y="310" font-size="12.5" class="muted">looks like HTTPS · outbound only</text>
@@ -114,7 +114,7 @@
 
   <!-- More probes, the same -->
   <g>
-    <rect class="card" x="500" y="40" width="214" height="96" rx="12"/>
+    <rect class="card" x="500" y="40" width="256" height="96" rx="12"/>
     <g class="ico">
       <rect x="518" y="60" width="40" height="52" rx="5"/>
       <path d="M526 74 h24 M526 86 h24 M526 98 h24"/>
@@ -125,17 +125,17 @@
     <text x="629" y="115" font-size="11" class="mono" text-anchor="middle">xray-pwc-aio</text>
   </g>
   <g>
-    <rect class="card" x="500" y="160" width="214" height="96" rx="12"/>
+    <rect class="card" x="500" y="160" width="256" height="96" rx="12"/>
     <rect x="514" y="190" width="50" height="36" rx="4" style="fill: none; stroke: var(--pi); stroke-width: 2"/>
     <rect x="522" y="200" width="14" height="14" rx="2" style="fill: var(--pi)"/>
     <path d="M542 202 h14 M542 210 h14 M518 222 h42" style="stroke: var(--pi); stroke-width: 2; stroke-dasharray: 2 3"/>
-    <text x="574" y="190" font-size="13" class="h mono">saratov-pi</text>
-    <text x="574" y="208" font-size="12" class="muted">Raspberry Pi · Saratov</text>
+    <text x="574" y="190" font-size="13" class="h mono">elder-rylanor</text>
+    <text x="574" y="208" font-size="12" class="muted">Raspberry Pi · Saint-Petersburg</text>
     <rect class="box" x="574" y="220" width="110" height="22" rx="5" stroke-width="1.5"/>
     <text x="629" y="235" font-size="11" class="mono" text-anchor="middle">xray-pwc-aio</text>
   </g>
   <g>
-    <rect class="card" x="500" y="540" width="214" height="96" rx="12"/>
+    <rect class="card" x="500" y="540" width="256" height="96" rx="12"/>
     <g class="ico">
       <rect x="514" y="562" width="50" height="34" rx="4"/>
       <path d="M539 596 v10 M528 610 h22"/>
@@ -160,9 +160,9 @@
   </g>
   <g font-size="9.5" class="mono g-m" text-anchor="end">
     <text x="996" y="107">link-a@home</text>
-    <text x="996" y="139">link-b@home</text>
+    <text x="996" y="139">vox-link@home</text>
     <text x="996" y="171">link-a@lisbon-nas</text>
-    <text x="996" y="203">link-a@saratov-pi</text>
+    <text x="996" y="203">link-a@elder-rylanor</text>
   </g>
   <rect class="g-ok" x="1002" y="94" width="234" height="20" rx="2"/>
   <rect class="g-ok" x="1002" y="126" width="98" height="20" rx="2"/>
@@ -185,7 +185,7 @@
       <text x="918" y="318">3</text><text x="1011" y="318">3</text><text x="1104" y="318">3</text><text x="1197" y="318">2</text>
     </g>
     <g font-size="7.5" class="mono g-m" text-anchor="middle">
-      <text x="918" y="334">a@home</text><text x="1011" y="334">b@home</text><text x="1104" y="334">a@lisbon</text><text x="1197" y="334">a@saratov</text>
+      <text x="918" y="334">a@home</text><text x="1011" y="334">vox@home</text><text x="1104" y="334">a@lisbon</text><text x="1197" y="334">a@elder</text>
     </g>
   </g>
 
