@@ -46,7 +46,7 @@ xray-pwc-aio/       The probe image and the bundle. Dockerfile (targets image, b
   rootfs/           image side: s6 definitions, aio-run, finish, bootstrap.py, logrotate, crontab
   services/         release side: the service scripts (common.sh, wg, connect-forward, probe, alloy, relay, sshd, sshd_config)
 ansible/            Deployment. Run every command from this directory (ansible.cfg sets inventory).
-  monitoring.yml probes.yml xray-pwc-net-join.yml xray-pwc-net-remove.yml migrate-1.1.yml (one-time)
+  monitoring.yml probes.yml xray-pwc-net-join.yml xray-pwc-net-remove.yml
   tasks/{docker,xray-pwc-net,release-fetch,aio-package,outbound-policy}.yml   handlers/xray-pwc-net.yml
   group_vars/{all,monitoring,probes}.yml   templates/{monitoring,probe,xray-pwc-net}/
 dist/               (git-ignored) build output: dist/<version>/, dist/tools/
@@ -306,7 +306,6 @@ for `xray_pwc_release: local` and `make tool`: Docker with buildx, Go, uv.
 | `ansible-playbook xray-pwc-net-join.yml -e name=<n>` | probe: address, keys, inventory.d, empty link files, server update, compose.yml; server name: keys only (the server play's `hosts` is `none` then) |
 | `ansible-playbook probes.yml [--limit p] [-e xray_pwc_release=local]` | in the container, as abc: the release, tools, state files, switch, prune |
 | `ansible-playbook xray-pwc-net-remove.yml -e name=<n>` | forget member (host_vars, inventory.d, join dir), update server; links stay; the container stays until its owner removes it |
-| `ansible-playbook migrate-1.1.yml` | ONE-TIME, pre-1.1.0 -> 1.1.0: server vpnc-net -> xray-pwc-net, probes replaced via host SSH (`probe_host*`), then probes.yml. Delete after |
 
 `--check --diff` works everywhere (read-only commands and release-fetch have `check_mode:
 false`); deliveries and a new member's later plays are skipped in check mode.

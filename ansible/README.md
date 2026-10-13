@@ -409,11 +409,3 @@ readable by root on the host.
 in the probes: Alloy and Caddy in
 [`../xray-pwc-aio/deps.env`](../xray-pwc-aio/deps.env), and the image's own
 in [`../xray-pwc-aio/Dockerfile`](../xray-pwc-aio/Dockerfile).
-
-## Moving from the old layout
-
-`migrate-1.1.yml` moves a deployment of before 1.1.0 (vpnc-net, a root
-container with `./state` on the host) once: the server to xray-pwc-net, each
-probe to the 1.1.0 image, with the same keys and addresses. It is the last
-thing that needs SSH to the probes' hosts (`probe_host`, `probe_host_user`,
-`probe_host_port` in the inventory). Delete it and those settings after.
