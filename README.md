@@ -8,7 +8,7 @@ A piece of software to have one, several or even an entire fleet of XRay VPN mon
 
 The setup is very simple. You just need to run a single docker container, that's it. It's called AIO, or all-in-one.
 
-<picture>
+![A probe is one container on any computer behind NAT; every probe dials out to one monitoring server through WireGuard inside xray](docs/fleet.svg)
 
 ## About
 
