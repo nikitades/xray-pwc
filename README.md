@@ -1,8 +1,24 @@
-# xray-pwc
+<p align="center">
+  <img src="docs/logo.svg" alt="xray-pwc logo" width="160">
+</p>
 
-## One sentence explanation
+<h1 align="center">xray-pwc</h1>
 
-A piece of software to have one, several or even an entire fleet of XRay VPN monitoring probes.
+<p align="center">
+  <b>Probes that check your XRay VPN links from real networks, the way a person would.</b>
+</p>
+
+<p align="center">
+  <a href="https://github.com/nikitades/xray-pwc/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/nikitades/xray-pwc/ci.yml?branch=main&label=CI"></a>
+  <a href="https://github.com/nikitades/xray-pwc/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/nikitades/xray-pwc"></a>
+  <a href="https://github.com/nikitades/xray-pwc/pkgs/container/xray-pwc-aio"><img alt="Image" src="https://img.shields.io/badge/ghcr.io-xray--pwc--aio-2496ED?logo=docker&logoColor=white"></a>
+  <img alt="Platforms" src="https://img.shields.io/badge/platform-amd64%20%7C%20arm64-555">
+  <img alt="Python" src="https://img.shields.io/badge/python-3.14-3776AB?logo=python&logoColor=white">
+  <img alt="Go" src="https://img.shields.io/badge/go-1.27-00ADD8?logo=go&logoColor=white">
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/github/license/nikitades/xray-pwc"></a>
+  <a href="https://github.com/nikitades/xray-pwc/commits/main"><img alt="Last commit" src="https://img.shields.io/github/last-commit/nikitades/xray-pwc"></a>
+  <a href="https://grafana.com/grafana/dashboards/25903/"><img alt="Grafana dashboard" src="https://img.shields.io/badge/grafana-dashboard%2025903-F46800?logo=grafana&logoColor=white"></a>
+</p>
 
 ## Killer feature
 
