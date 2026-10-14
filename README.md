@@ -151,6 +151,33 @@ sources: `make bundle` here, or `xray_pwc_release: local` in Ansible to try
 it on a probe before the release. The root [`Makefile`](Makefile) builds the
 same way locally and in CI. MIT licensed, see [`LICENSE`](LICENSE).
 
+## The dashboard
+
+[![The VPN fleet dashboard in Grafana](https://grafana.com/api/dashboards/25903/images/22167/image)](https://grafana.com/grafana/dashboards/25903/)
+
+One page for the whole fleet, from the probes' metrics. The colours are the
+check's stages: green is `3`, every page opened; yellow is `2`, traffic got
+through but not every page opened; orange and red are `1` and `0`, nothing
+got through ([the stages](xray-pwc-probe/README.md)).
+
+- **VPN tunnels at hosts**: every link on every probe over time, one row per
+  `link@probe`.
+- **VPN online**: the stage of each link now.
+- **Degraded tunnels** and **Degraded hosts**: only the links, and the probes,
+  that fell below `2`. Empty means all is well.
+- **VPN tunnels at hosts - errors**: why checks failed, by error type, link
+  and probe.
+- **Hosts CPU**, **Hosts mem**: the load of the machines the probes run on.
+- **Probes network**: the probes' own traffic, in and out (the container's
+  network, not the whole host's).
+
+To install it, in Grafana:
+
+1. **Connections → Data sources → Add → Prometheus**, URL
+   `http://prometheus:9090` (the server's Compose network). Save.
+2. **Dashboards → New → Import**, ID `25903`, **Load**, pick that data
+   source, **Import**.
+
 ## Where to read more
 
 - [`xray-pwc-probe/`](xray-pwc-probe/README.md), the checker: what one check
