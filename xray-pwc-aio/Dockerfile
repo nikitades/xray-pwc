@@ -81,7 +81,8 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     S6_BEHAVIOUR_IF_STAGE2_FAILS=2 S6_CMD_WAIT_FOR_SERVICES_MAXTIME=0
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-       wireguard-tools iproute2 libcap2-bin openssh-server cron logrotate zstd procps ca-certificates \
+       wireguard-tools iproute2 libcap2-bin openssh-server cron logrotate zstd procps ca-certificates cowsay \
+    && ln -s /usr/games/cowsay /usr/local/bin/cowsay \
     && rm -rf /var/lib/apt/lists/* /etc/ssh/ssh_host_*
 # Chromium and its system libraries for the Playwright of the bundle inside,
 # so the first start downloads nothing.
