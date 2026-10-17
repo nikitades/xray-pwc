@@ -20,6 +20,33 @@
   <a href="https://grafana.com/grafana/dashboards/25903/"><img alt="Grafana dashboard" src="https://img.shields.io/badge/grafana-dashboard%2025903-F46800?logo=grafana&logoColor=white"></a>
 </p>
 
+ ## Quick start
+
+  Run everything from `ansible/`.
+
+  1. Get a VPS for metrics and Grafana: public IP, a DNS name for Grafana,
+     ports 80, 443 and UDP 51973 open.
+  2. `ansible-galaxy collection install -r requirements.yml -p ./collections`
+  3. `cp inventory.example.yml inventory.yml`: set the VPS under `monitoring`,
+     the Grafana domain and `pwc_net_ssh_key`.
+  4. `cp vault.yml.example vault.yml`: set the Grafana admin password.
+  5. `ansible-playbook xray-pwc-net-join.yml -e name=<vps>`: the server's keys.
+  6. `ansible-playbook monitoring.yml`
+  7. Find a probe machine (anything with Docker) and run
+     `ansible-playbook xray-pwc-net-join.yml -e name=some-new-machine-name`.
+     It creates:
+     - `files/probes/some-new-machine-name/`: `links.txt`, the VPN links to check,
+       and `service_links.txt`;
+     - `inventory.d/some-new-machine-name.yml`: the probe in the inventory;
+     - `files/xray-pwc-net/join/some-new-machine-name/compose.yml`: the container
+       with its join token.
+  8. Copy `compose.yml` to the probe machine and run `docker compose up -d` there.
+  9. Put your links into `links.txt`, one per line.
+  10. `ansible-playbook probes.yml --limit some-new-machine-name`
+  11. In Grafana add a Prometheus data source, URL `http://prometheus:9090`, then
+      import [the dashboard](https://grafana.com/grafana/dashboards/25903-vpn-fleet/).
+  12. See VPN metrics!
+
 ## Killer feature
 
 The setup is very simple. You just need to run a single docker container, that's it. It's called AIO, or all-in-one.
