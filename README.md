@@ -33,11 +33,13 @@
   5. `ansible-playbook xray-pwc-net-join.yml -e name=<vps>`: the server's keys.
   6. `ansible-playbook monitoring.yml`
   7. Find a probe machine (anything with Docker) and run
-     `ansible-playbook xray-pwc-net-join.yml -e name=some-new-machine-name`.
-     It creates:
+     `ansible-playbook xray-pwc-net-join.yml -e name=some-new-machine-name -e policy=plain`.
+     Where the network blocks UDP to the server, use `-e policy=vpn
+     -e service_links="$(base64 < links-for-the-tunnel.txt)"` instead: the probe
+     reaches the server through those links. It creates:
      - `files/probes/some-new-machine-name/`: `links.txt`, the VPN links to check,
        and `service_links.txt`;
-     - `inventory.d/some-new-machine-name.yml`: the probe in the inventory;
+     - `inventory.d/some-new-machine-name.yml`: the probe and its policy in the inventory;
      - `files/xray-pwc-net/join/some-new-machine-name/compose.yml`: the container
        with its join token.
   8. Copy `compose.yml` to the probe machine and run `docker compose up -d` there.
@@ -169,8 +171,11 @@ A release is a tag: raise `VERSION`, merge, and push `vX.Y.Z`. CI
   `SHA256SUMS`;
 - the image `ghcr.io/nikitades/xray-pwc-aio:X.Y.Z` (also `X.Y` and
   `latest`), amd64 and arm64, built from the same wheel and binaries;
+- the same image in GitFlic, `registry.gitflic.ru/.../xray-pwc-aio`, for
+  probes in Russia (`-e target=ru` at the join), when the repository variable
+  `GITFLIC_IMAGE` and the secrets `GITFLIC_USER`, `GITFLIC_TOKEN` are set;
 - the tag `xray-pwc-connect/vX.Y.Z`, so that
-  `go install github.com/nikitades/xray-pwc/xray-pwc-connect/cmd/xray-pwc-connect@latest`
+  `go install github.com/nikitades/xray-pwc/xray-pwc-connect/v2/cmd/xray-pwc-connect@latest`
   (or `@vX.Y.Z`) installs it.
 
 Everything else is a dev build, `X.Y.Z-dev.<hash>`, named by a hash of its

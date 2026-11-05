@@ -17,7 +17,7 @@ Internally, links are parsed by libXray and served by in-process xray-core.
 ## Install
 
 ```
-go install github.com/nikitades/xray-pwc/xray-pwc-connect/cmd/xray-pwc-connect@latest
+go install github.com/nikitades/xray-pwc/xray-pwc-connect/v2/cmd/xray-pwc-connect@latest
 ```
 
 or `@vX.Y.Z` for one release. Each GitHub release `vX.Y.Z` also has static

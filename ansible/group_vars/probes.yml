@@ -20,10 +20,13 @@ xray_pwc_dist: "{{ playbook_dir }}/../dist"
 aio_keep_releases: 2
 
 # The image a new probe starts from, in compose.yml. The tag is a published
-# release: with xray_pwc_release: local, the repository's VERSION. A fork that
-# changes the image publishes its own and sets aio_image_name in inventory.yml.
+# release: with xray_pwc_release: local, the repository's VERSION. The registry is
+# the probe's aio_target in aio_registries (group_vars/all.yml), set per probe by
+# the join (-e target=). A fork that changes the image publishes its own and sets
+# aio_image_name in inventory.yml.
+aio_target: us
 aio_image_version: "{{ lookup('file', playbook_dir ~ '/../VERSION') if xray_pwc_release == 'local' else xray_pwc_release }}"
-aio_image: "{{ aio_image_name | default('ghcr.io/nikitades/xray-pwc-aio') }}:{{ aio_image_version }}"
+aio_image: "{{ aio_image_name | default(aio_registries[aio_target]) }}:{{ aio_image_version }}"
 
 # /app/state/aio.env, read by the services of the container.
 aio_env:
@@ -72,7 +75,6 @@ probe_dns: []
 #   vpn    xray-pwc-net through the links in files/probes/<probe>/service_links.txt,
 #          for networks that block UDP to the server; Alloy as with plain.
 outbound_access_policy: plain
-outbound_access_policies: [plain, relay, vpn]
 aio_relay: "{{ outbound_access_policy == 'relay' }}"
 
 # Alloy sends to Prometheus on the server's xray-pwc-net address.

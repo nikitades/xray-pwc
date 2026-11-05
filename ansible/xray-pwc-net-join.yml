@@ -1,10 +1,14 @@
 ---
 # Adds a machine to xray-pwc-net.
-#   a probe:      ansible-playbook xray-pwc-net-join.yml -e name=<name>
+#   a probe:      ansible-playbook xray-pwc-net-join.yml -e name=<name> -e policy=<plain|relay|vpn>
+#                 with policy=vpn also -e service_links=<base64 of the links, one per line>
+#                 [-e target=<us|ru>]: the registry its image comes from (default us)
 #   the server:   ansible-playbook xray-pwc-net-join.yml -e name=<the monitoring host>
+# policy is the probe's outbound_access_policy, target its aio_target (group_vars/probes.yml).
 # Writes host_vars/<name>/xray-pwc-net.yml (address and keys). For a probe it also writes
-# inventory.d/<name>.yml and files/probes/<name>/ with empty links.txt and
-# service_links.txt, unless they are there, tells the server, and makes
+# inventory.d/<name>.yml with the policy and the target, files/probes/<name>/service_links.txt from
+# service_links, and empty links.txt and service_links.txt, unless they are there,
+# tells the server, and makes
 # files/xray-pwc-net/join/<name>/compose.yml: the probe's container with its join token,
 # to start on the machine with `docker compose up -d`, and next-steps.txt.
 # With outbound_access_policy: vpn, the token has the links of service_links.txt.
@@ -24,6 +28,12 @@
     join_prefix: "{{ pwc_net_subnet.split('/')[0].rsplit('.', 1)[0] }}"
     # The server is .1; the rest get the first free address from .10.
     join_ip: "{{ join_prefix ~ '.1' if name == pwc_net_server else range(10, 255) | map('string') | map('regex_replace', '^', join_prefix ~ '.') | reject('in', join_used_ips) | first }}"
+    join_probe: "{{ name != pwc_net_server }}"
+    join_inventory: "{{ playbook_dir }}/inventory.d/{{ name }}.yml"
+    # -e service_links: the links, one per line, in base64 (base64 < service_links.txt).
+    join_service_links: "{{ (service_links | default('') | b64decode).splitlines() | map('trim') | reject('match', '^(#|$)') | list }}"
+    # -e target, else what the inventory has for the probe (a rerun keeps it), else us.
+    join_target: "{{ target | default((hostvars[name] | default({})).aio_target | default('us')) }}"
 
   tasks:
     - name: Check parameters
@@ -34,6 +44,57 @@
           -e name=<name>. A name is a DNS label: lowercase letters, digits and dashes.
           It becomes the probe's hostname and <name>.{{ pwc_net_domain }}.
         quiet: true
+
+    - name: Check policy
+      ansible.builtin.assert:
+        that:
+          - policy | default('') in outbound_access_policies
+        fail_msg: >-
+          -e policy=<{{ outbound_access_policies | join('|') }}>: how the probe reaches the
+          server, its outbound_access_policy (group_vars/probes.yml)
+        quiet: true
+      when: join_probe
+
+    - name: Check target
+      ansible.builtin.assert:
+        that:
+          - join_target in aio_registries
+        fail_msg: >-
+          -e target=<{{ aio_registries | join('|') }}>: the registry the probe pulls its image
+          from (aio_registries, group_vars/all.yml); us when not given
+        quiet: true
+      when: join_probe
+
+    - name: Check service links
+      ansible.builtin.assert:
+        that:
+          - policy != 'vpn' or join_service_links | length > 0
+          - join_service_links | reject('match', '^[a-z][a-z0-9+.-]*://') | list | length == 0
+        fail_msg: >-
+          policy=vpn needs -e service_links=<base64 of the links, one per line>, for example
+          -e service_links="$(base64 < service_links.txt)": the tunnel to the server goes through them.
+          Every line must be a share link.
+        quiet: true
+      when: join_probe
+
+    - name: Find inventory entry
+      ansible.builtin.stat:
+        path: "{{ join_inventory }}"
+      register: join_inventory_file
+      when: join_probe
+
+    # A probe set in inventory.yml keeps its settings there.
+    - name: Check inventory settings
+      ansible.builtin.assert:
+        that:
+          - hostvars[name].outbound_access_policy == policy
+          - hostvars[name].aio_target == join_target
+        fail_msg: >-
+          {{ name }} is in inventory.yml with outbound_access_policy:
+          {{ hostvars[name].outbound_access_policy }} and aio_target: {{ hostvars[name].aio_target }}:
+          change them there, or pass -e policy= and -e target= to match
+        quiet: true
+      when: join_probe and name in groups['all'] and not join_inventory_file.stat.exists
 
     - name: Find used addresses
       ansible.builtin.shell: grep -h '^pwc_net_ip:' {{ playbook_dir }}/host_vars/*/xray-pwc-net.yml || true
@@ -80,22 +141,30 @@
     - name: Add to inventory
       ansible.builtin.template:
         src: templates/xray-pwc-net/inventory.yml.j2
-        dest: "{{ playbook_dir }}/inventory.d/{{ name }}.yml"
+        dest: "{{ join_inventory }}"
         mode: "0644"
-      when: name not in groups['all']
+      when: join_probe and (name not in groups['all'] or join_inventory_file.stat.exists)
 
     - name: Reload inventory
       ansible.builtin.meta: refresh_inventory
 
     # Empty files, to be filled in; existing ones are kept.
     - name: Create link files
-      when: name != pwc_net_server
+      when: join_probe
       block:
         - name: Create links directory
           ansible.builtin.file:
             path: "{{ playbook_dir }}/files/probes/{{ name }}"
             state: directory
             mode: "0700"
+
+        - name: Write service links
+          ansible.builtin.copy:
+            content: "{{ join_service_links | join('\n') ~ '\n' }}"
+            dest: "{{ playbook_dir }}/files/probes/{{ name }}/service_links.txt"
+            mode: "0600"
+          no_log: true
+          when: join_service_links | length > 0
 
         - name: Create empty link files
           ansible.builtin.copy:

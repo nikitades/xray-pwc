@@ -6,3 +6,5 @@ all:
     probes:
       hosts:
         {{ name }}:
+          outbound_access_policy: {{ policy }}
+          aio_target: {{ join_target }}

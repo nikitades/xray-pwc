@@ -1,4 +1,4 @@
-module github.com/nikitades/xray-pwc/xray-pwc-connect
+module github.com/nikitades/xray-pwc/xray-pwc-connect/v2
 
 go 1.27.1
 

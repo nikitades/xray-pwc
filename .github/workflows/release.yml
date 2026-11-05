@@ -2,9 +2,9 @@
 #   - GitHub release vX.Y.Z: xray-pwc-connect for Linux and macOS, the
 #     xray-pwc-probe wheel, the bundles Ansible brings to the probes, SHA256SUMS
 #   - ghcr.io/nikitades/xray-pwc-aio:X.Y.Z, X.Y and latest, for amd64 and arm64,
-#     built from those same files
+#     built from those same files, and the same tags copied to GitFlic (vars.GITFLIC_IMAGE)
 #   - the tag xray-pwc-connect/vX.Y.Z, for
-#     go install github.com/nikitades/xray-pwc/xray-pwc-connect/cmd/xray-pwc-connect@vX.Y.Z
+#     go install github.com/nikitades/xray-pwc/xray-pwc-connect/v2/cmd/xray-pwc-connect@vX.Y.Z
 name: release
 
 on:
@@ -125,6 +125,24 @@ jobs:
           docker buildx imagetools create \
             -t "$IMAGE:$VERSION" -t "$IMAGE:${VERSION%.*}" -t "$IMAGE:latest" \
             $(for d in "$RUNNER_TEMP"/digests/*; do echo "$IMAGE@$(cat "$d")"; done)
+      # The same image in GitFlic, for probes in Russia (aio_registries "ru" in
+      # ansible/group_vars/all.yml): copied from GHCR, not built again. Set up with
+      # the repository variable GITFLIC_IMAGE (registry.gitflic.ru/project/<owner>/<project>/xray-pwc-aio)
+      # and the secrets GITFLIC_USER and GITFLIC_TOKEN (a GitFlic transport token).
+      - uses: docker/login-action@v3
+        if: vars.GITFLIC_IMAGE != ''
+        with:
+          registry: registry.gitflic.ru
+          username: ${{ secrets.GITFLIC_USER }}
+          password: ${{ secrets.GITFLIC_TOKEN }}
+      - name: Copy the image to GitFlic
+        if: vars.GITFLIC_IMAGE != ''
+        env:
+          GITFLIC_IMAGE: ${{ vars.GITFLIC_IMAGE }}
+        run: |
+          docker buildx imagetools create \
+            -t "$GITFLIC_IMAGE:$VERSION" -t "$GITFLIC_IMAGE:${VERSION%.*}" -t "$GITFLIC_IMAGE:latest" \
+            "$IMAGE:$VERSION"
       - run: make sums RELEASE=1
       - name: Publish the release
         env:

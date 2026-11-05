@@ -17,7 +17,7 @@ its owner's `docker compose up -d`. MIT license.
 
 ## 2. Versions
 
-One version, root `VERSION` (1.1.0), for xray-pwc-probe, xray-pwc-connect, the bundle and
+One version, root `VERSION` (2.0.0), for xray-pwc-probe, xray-pwc-connect, the bundle and
 the image. `xray-pwc-probe/pyproject.toml` repeats it (`make check-version`). Semver: new
 feature -> minor, fix -> patch; bump with every release.
 
@@ -35,7 +35,7 @@ feature -> minor, fix -> patch; bump with every release.
 ```
 VERSION LICENSE Makefile   one version; MIT; every build (local and CI)
 .github/workflows/         ci.yml (tests + dev builds per arch), release.yml (tag -> everything)
-xray-pwc-connect/   Go module github.com/nikitades/xray-pwc/xray-pwc-connect (tags
+xray-pwc-connect/   Go module github.com/nikitades/xray-pwc/xray-pwc-connect/v2 (tags
                     xray-pwc-connect/vX.Y.Z). share links -> local ports: SOCKS5 each, or one forward port.
   cmd/xray-pwc-connect/main.go   internal/tun/  internal/logfmt/
 xray-pwc-probe/     Python 3.14, uv, wheel xray_pwc_probe. The checker. Its Dockerfile is for local tries.
@@ -74,7 +74,9 @@ CI release (`release.yml`): `files` (check tag == VERSION, make test, make conne
 RELEASE=1, artifact) -> `build` matrix amd64 `ubuntu-24.04` / arm64 `ubuntu-24.04-arm`
 (make bundle; make image push-by-digest) -> `publish` (imagetools create X.Y.Z, X.Y, latest;
 make sums; `gh release create vX.Y.Z` with bundles, connect binaries, wheel, SHA256SUMS; push
-tag `xray-pwc-connect/vX.Y.Z`). `ci.yml`: make test; per arch make bundle and image (cacheonly).
+tag `xray-pwc-connect/vX.Y.Z`); with repo variable `GITFLIC_IMAGE` (+ secrets `GITFLIC_USER`,
+`GITFLIC_TOKEN`) also `imagetools create` copies X.Y.Z, X.Y, latest from GHCR to GitFlic. Go module path
+ends in `/v2` (major version 2). `ci.yml`: make test; per arch make bundle and image (cacheonly).
 
 ## 5. Runtime topology
 
@@ -108,7 +110,10 @@ routing `~xray-pwc-net.internal` to CoreDNS for the host itself); docker drop-in
 
 On the host: `compose.yml` + named volume `xray-pwc-aio_app` (= `/app`), nothing else.
 `compose.yml` (`templates/probe/compose.yml.j2`): image `aio_image` =
-`<aio_image_name | default ghcr.io/nikitades/xray-pwc-aio>:<aio_image_version>`
+`<aio_image_name | default aio_registries[aio_target]>:<aio_image_version>`; `aio_registries`
+(`group_vars/all.yml`): `us` = `ghcr.io/nikitades/xray-pwc-aio`, `ru` =
+`registry.gitflic.ru/project/nikitades/xray-pwc/xray-pwc-aio`; `aio_target` per probe (default `us`,
+written to inventory.d by the join's `-e target`)
 (`xray_pwc_release`, or VERSION when it is `local`), `hostname: <probe>`, `cap_add:
 NET_ADMIN`, `/dev/net/tun`, `shm_size: 512m`, `dns:` from `probe_dns`, env `PWC_JOIN`
 (token), mounts `app:/app`, host `/proc`,`/sys`,`/` ro (for Alloy). Same file on every OS.
@@ -303,9 +308,9 @@ for `xray_pwc_release: local` and `make tool`: Docker with buildx, Go, uv.
 | command | does |
 |---|---|
 | `ansible-playbook monitoring.yml` | xray-pwc-net server, Prometheus, Grafana, CoreDNS, Caddy |
-| `ansible-playbook xray-pwc-net-join.yml -e name=<n>` | probe: address, keys, inventory.d, empty link files, server update, compose.yml; server name: keys only (the server play's `hosts` is `none` then) |
+| `ansible-playbook xray-pwc-net-join.yml -e name=<n> -e policy=<plain\|relay\|vpn> [-e service_links=<base64>] [-e target=<us\|ru>]` | probe: policy required, service_links required with vpn; target = registry of the image in compose.yml (default: the inventory's `aio_target`, else us); address, keys, inventory.d with the policy and `aio_target` (kept in inventory.yml if the probe is set there: must match), service_links.txt from service_links, empty link files, server update, compose.yml; server name: keys only (the server play's `hosts` is `none` then) |
 | `ansible-playbook probes.yml [--limit p] [-e xray_pwc_release=local]` | in the container, as abc: the release, tools, state files, switch, prune |
-| `ansible-playbook xray-pwc-net-remove.yml -e name=<n>` | forget member (host_vars, inventory.d, join dir), update server; links stay; the container stays until its owner removes it |
+| `ansible-playbook xray-pwc-net-remove.yml -e name=<n>` | forget member (host_vars, inventory.d, join dir), update server; links and inventory.yml stay. `-e purge=true`: also files/probes/<n>, its block in inventory.yml (scripts/inventory-drop-host.py, keeps comments), known_hosts by address and name. Prometheus data stays; the container stays until its owner removes it |
 
 `--check --diff` works everywhere (read-only commands and release-fetch have `check_mode:
 false`); deliveries and a new member's later plays are skipped in check mode.

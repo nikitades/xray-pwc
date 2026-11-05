@@ -35,8 +35,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/nikitades/xray-pwc/xray-pwc-connect/internal/logfmt"
-	"github.com/nikitades/xray-pwc/xray-pwc-connect/internal/tun"
+	"github.com/nikitades/xray-pwc/xray-pwc-connect/v2/internal/logfmt"
+	"github.com/nikitades/xray-pwc/xray-pwc-connect/v2/internal/tun"
 )
 
 // version is set at build time: -ldflags "-X main.version=1.1.0" (make, CI).

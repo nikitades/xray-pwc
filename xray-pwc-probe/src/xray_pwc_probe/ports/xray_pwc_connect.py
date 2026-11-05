@@ -25,7 +25,7 @@ from xray_pwc_probe.log import relayed
 
 INSTALL_HINT = (
     "Install xray-pwc-connect of the same release as xray-pwc-probe: "
-    "go install github.com/nikitades/xray-pwc/xray-pwc-connect/cmd/xray-pwc-connect@v<version>, "
+    "go install github.com/nikitades/xray-pwc/xray-pwc-connect/v2/cmd/xray-pwc-connect@v<version>, "
     "or take xray-pwc-connect-<os>-<arch> from the GitHub release v<version>. Lookup order: "
     "$GOBIN if set, else $GOPATH/bin (default ~/go/bin), then PATH; PWC_CONNECT_BIN pins an "
     "explicit path."

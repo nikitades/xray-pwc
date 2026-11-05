@@ -4,10 +4,17 @@
 # The probe's container stays on its host until its owner runs, in the folder of
 # compose.yml there: docker compose down -v --rmi all
 #   ansible-playbook xray-pwc-net-remove.yml -e name=<name>
+# With -e purge=true it forgets the probe everywhere here as well: its links
+# (files/probes/<name>/), its block in inventory.yml, and its SSH host keys in
+# ~/.ssh/known_hosts, so a new probe on the same address is not taken for a changed
+# key. The metrics already in Prometheus stay either way.
+#   ansible-playbook xray-pwc-net-remove.yml -e name=<name> -e purge=true
 - name: Forget the xray-pwc-net member
   hosts: localhost
   connection: local
   gather_facts: false
+  vars:
+    remove_purge: "{{ purge | default(false) | bool }}"
 
   tasks:
     - name: Check parameters
@@ -23,22 +30,60 @@
         path: "{{ playbook_dir }}/inventory.d/{{ name }}.yml"
       register: remove_entry
 
+    # Read before the files go: the known_hosts entries are by address.
+    - name: Find the member's address
+      ansible.builtin.set_fact:
+        remove_ip: "{{ hostvars[name].pwc_net_ip | default('') }}"
+        remove_port: "{{ hostvars[name].ansible_port | default(2222) }}"
+
     - name: Remove member files
       ansible.builtin.file:
         path: "{{ item }}"
         state: absent
-      loop:
-        - "{{ playbook_dir }}/host_vars/{{ name }}"
-        - "{{ playbook_dir }}/inventory.d/{{ name }}.yml"
-        - "{{ pwc_net_join_dir }}/{{ name }}"
+      loop: "{{ remove_files + (remove_purge_files if remove_purge else []) }}"
+      vars:
+        remove_files:
+          - "{{ playbook_dir }}/host_vars/{{ name }}"
+          - "{{ playbook_dir }}/inventory.d/{{ name }}.yml"
+          - "{{ pwc_net_join_dir }}/{{ name }}"
+        remove_purge_files:
+          - "{{ playbook_dir }}/files/probes/{{ name }}"
+
+    - name: Purge
+      when: remove_purge
+      block:
+        # Only the host's own block; the comments and order of the rest stay.
+        - name: Remove from inventory.yml
+          ansible.builtin.command:
+            argv:
+              - "{{ ansible_playbook_python }}"
+              - "{{ playbook_dir }}/scripts/inventory-drop-host.py"
+              - "{{ playbook_dir }}/inventory.yml"
+              - "{{ name }}"
+              - "{{ '--check' if ansible_check_mode else '--write' }}"
+          register: remove_inventory
+          changed_when: remove_inventory.stdout_lines[-1] == 'changed'
+          check_mode: false
+
+        - name: Show inventory.yml change
+          ansible.builtin.debug:
+            msg: "{{ remove_inventory.stdout_lines[:-1] }}"
+          when: remove_inventory is changed
+
+        # Ansible connects by address, ssh -J by name; both on the container's port.
+        - name: Remove SSH host keys
+          ansible.builtin.known_hosts:
+            name: "[{{ item }}]:{{ remove_port }}"
+            state: absent
+          loop: "{{ ([remove_ip] if remove_ip else []) + [name ~ '.' ~ pwc_net_domain] }}"
 
     - name: Reload inventory
       ansible.builtin.meta: refresh_inventory
 
     - name: Report inventory.yml entry
       ansible.builtin.debug:
-        msg: "{{ name }} is still in inventory.yml: remove it there by hand."
-      when: name in groups['all'] and not remove_entry.stat.exists
+        msg: "{{ name }} is still in inventory.yml: remove it there by hand, or run again with -e purge=true."
+      when: name in groups['all'] and not remove_entry.stat.exists and not ansible_check_mode
 
 - name: Tell the xray-pwc-net server
   hosts: monitoring

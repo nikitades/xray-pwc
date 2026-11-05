@@ -48,5 +48,13 @@ pwc_net_via_lines: "{{ lookup('file', pwc_net_service_links).splitlines() | map(
 pwc_net_via: "{{ inventory_hostname != pwc_net_server and outbound_access_policy | default('plain') == 'vpn' }}"
 pwc_net_via_links: "{{ (pwc_net_via_lines | join('\n') ~ '\n') if pwc_net_via and pwc_net_via_lines else '' }}"
 pwc_net_via_port: 51974
+# The values of outbound_access_policy (group_vars/probes.yml).
+outbound_access_policies: [plain, relay, vpn]
+# Where the image is published (.github/workflows/release.yml), by where a probe
+# pulls it from: its aio_target (group_vars/probes.yml), the join's -e target.
+# A registry abroad can be slow or cut from inside Russia, hence one there too.
+aio_registries:
+  us: ghcr.io/nikitades/xray-pwc-aio
+  ru: registry.gitflic.ru/project/nikitades/xray-pwc/xray-pwc-aio
 # Join files (compose.yml with the token) from xray-pwc-net-join.yml.
 pwc_net_join_dir: "{{ playbook_dir }}/files/xray-pwc-net/join"

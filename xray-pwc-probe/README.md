@@ -223,7 +223,7 @@ You need Python 3.14 and `xray-pwc-connect` of the same release. From a
 GitHub release `vX.Y.Z`, with [uv](https://docs.astral.sh/uv/):
 
 ```bash
-go install github.com/nikitades/xray-pwc/xray-pwc-connect/cmd/xray-pwc-connect@vX.Y.Z
+go install github.com/nikitades/xray-pwc/xray-pwc-connect/v2/cmd/xray-pwc-connect@vX.Y.Z
 uv tool install https://github.com/nikitades/xray-pwc/releases/download/vX.Y.Z/xray_pwc_probe-X.Y.Z-py3-none-any.whl
 uvx --from playwright playwright install chromium
 echo 'vless://...your link...#my-server' > links.txt

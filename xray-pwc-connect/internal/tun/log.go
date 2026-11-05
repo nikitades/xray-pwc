@@ -7,7 +7,7 @@ import (
 
 	"github.com/xtls/xray-core/common/log"
 
-	"github.com/nikitades/xray-pwc/xray-pwc-connect/internal/logfmt"
+	"github.com/nikitades/xray-pwc/xray-pwc-connect/v2/internal/logfmt"
 )
 
 // stderrHandler receives xray-core messages emitted before the core's own log

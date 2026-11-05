@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/nikitades/xray-pwc/xray-pwc-connect/internal/logfmt"
+	"github.com/nikitades/xray-pwc/xray-pwc-connect/v2/internal/logfmt"
 )
 
 // ForwardOptions serves one of Options.Links at a time on Options.StartPort,

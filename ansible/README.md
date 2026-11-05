@@ -8,14 +8,14 @@ Grafana, and any number of probes, each one `xray-pwc-aio` container.
 | `monitoring.yml` | `monitoring` | the xray-pwc-net server (WireGuard) + Prometheus (receives remote write) + Grafana + Caddy + CoreDNS |
 | `probes.yml` | the probe containers | the release (`xray_pwc_release`), the tools it needs, the links, the tunnel settings, inside each container |
 | `xray-pwc-net-join.yml` | your machine + `monitoring` | adds a xray-pwc-net member: address, keys, inventory entry, link files, `compose.yml` with the join token; tells the server. For the server itself only the keys |
-| `xray-pwc-net-remove.yml` | your machine + `monitoring` | forgets a xray-pwc-net member and tells the server |
+| `xray-pwc-net-remove.yml` | your machine + `monitoring` | forgets a xray-pwc-net member and tells the server; with `-e purge=true` also its links, `inventory.yml` entry and known_hosts |
 
 Run every command from this directory: `ansible.cfg` here sets the inventory
 and the collections path.
 
 ```bash
 ansible-playbook monitoring.yml                            # the central server
-ansible-playbook xray-pwc-net-join.yml -e name=<probe>     # a new probe
+ansible-playbook xray-pwc-net-join.yml -e name=<probe> -e policy=plain   # a new probe (step 7)
 ansible-playbook probes.yml                                # every probe
 ansible-playbook probes.yml --limit <probe>                # one probe
 ansible-playbook probes.yml --limit <probe> -e xray_pwc_release=local   # try this working tree
@@ -100,9 +100,9 @@ it does for the server: `monitoring.yml` sets it up in step 6.
 
 Each probe has a folder named exactly like the probe: `files/probes/<probe>/`.
 `xray-pwc-net-join.yml` makes it in step 7, with an empty `links.txt` and
-`service_links.txt`, and keeps files that are there: make it yourself before
-the join if you want the links in place first. Put the share links to check
-into `links.txt`, one per line:
+the service links you give it (`-e service_links`), and keeps files that are
+there: make it yourself before the join if you want the links in place
+first. Put the share links to check into `links.txt`, one per line:
 
 ```
 # Home ISP, main channel
@@ -119,8 +119,8 @@ list has no links. `files/probes/` is git-ignored.
 Different probes can have different links, or the same ones. The same link
 on several probes is what lets you compare networks.
 
-**How the probe reaches the server.** One setting per probe in the
-inventory, `outbound_access_policy`:
+**How the probe reaches the server.** One setting per probe,
+`outbound_access_policy`, given to the join as `-e policy=` (step 7):
 
 | policy | xray-pwc-net | Alloy sends | for |
 |---|---|---|---|
@@ -149,22 +149,31 @@ Check that `https://<grafana domain>` opens the Grafana login page.
 ### 7. Add the probes
 
 ```bash
-ansible-playbook xray-pwc-net-join.yml -e name=probe-2
+ansible-playbook xray-pwc-net-join.yml -e name=probe-2 -e policy=plain
+# a network that blocks UDP to the server: the tunnel goes through these links
+ansible-playbook xray-pwc-net-join.yml -e name=probe-2 -e policy=vpn \
+  -e service_links="$(base64 < my-service-links.txt)"
+# a machine in Russia: the image from GitFlic, not GHCR
+ansible-playbook xray-pwc-net-join.yml -e name=probe-2 -e policy=plain -e target=ru
 ```
 
-This writes `inventory.d/probe-2.yml` and `host_vars/probe-2/xray-pwc-net.yml`,
-creates `files/probes/probe-2/` with empty link files (existing ones are
-kept), tells the server about the new member, and makes
+`policy` is required for a probe, one of `plain`, `relay` and `vpn` (step 5);
+with `vpn` so is `service_links`, the links one per line, in base64. This
+writes `inventory.d/probe-2.yml` with the policy and
+`host_vars/probe-2/xray-pwc-net.yml`, creates `files/probes/probe-2/` with
+`service_links.txt` from `service_links` and an empty `links.txt` (existing
+files are kept), tells the server about the new member, and makes
 `files/xray-pwc-net/join/probe-2/compose.yml`. That file is the probe: the image,
 and the join token with the probe's key, the server's address and key, your
 SSH key and, with `outbound_access_policy: vpn`, the service links. It is
 private.
 
-If the probe's network blocks UDP to the server, set
-`outbound_access_policy: vpn` for it in `inventory.yml` and put links into
-`service_links.txt` before the join: they go into the token. If the join has
-run already, run it again: the address and keys stay, the token is new. The
-container reads the token only into an empty volume, and a probe whose
+If the probe's network blocks UDP to the server, join it with `policy=vpn`:
+the service links go into the token. If the join has run already, run it
+again with the new policy: the address and keys stay, the token is new. A
+probe set in `inventory.yml` keeps its policy there: the join stops if
+`policy` is another one. The container reads the token only into an empty
+volume, and a probe whose
 tunnel never comes up cannot be reached to fix it: get the token right
 before the first start. Once the tunnel is up, `probes.yml` changes these
 settings like any other.
@@ -177,8 +186,10 @@ docker compose up -d
 docker compose logs -f               # wait for: wg INFO handshake_ok
 ```
 
-The image is the release's, from GHCR (`aio_image` in
-`group_vars/probes.yml`). Then put the links to check into
+The image is the release's, from the registry of the probe's `aio_target`:
+`us` (GHCR, the default) or `ru` (GitFlic, for machines in Russia), see
+`aio_registries` in `group_vars/all.yml`. Pick it at the join with
+`-e target=ru`; a rerun keeps the probe's target. Then put the links to check into
 `files/probes/probe-2/links.txt` (step 5) and:
 
 ```bash
@@ -247,12 +258,19 @@ older and says so. Its owner sets the new `image:` in `compose.yml` and runs
 
 **Add a probe:** see step 7.
 
-**Remove a probe:** forget it here; its links in `files/probes/<probe>/`
-stay, delete them yourself. The container keeps running until its owner
+**Remove a probe:** the server drops it from xray-pwc-net and DNS, and
+here its address and keys (`host_vars/<probe>/`), `inventory.d/<probe>.yml`
+and its join folder go. Its links in `files/probes/<probe>/` and an entry in
+`inventory.yml` stay. With `-e purge=true` they go too, and its SSH host keys
+in `~/.ssh/known_hosts`, so that a new probe on the same address does not
+look like a changed key; from `inventory.yml` only the probe's own block,
+the rest of the file stays as it is. `--check` shows what goes. The metrics
+already in Prometheus stay. The container keeps running until its owner
 runs `docker compose down -v --rmi all` in the folder of `compose.yml`.
 
 ```bash
-ansible-playbook xray-pwc-net-remove.yml -e name=<probe>
+ansible-playbook xray-pwc-net-remove.yml -e name=<probe>                 # out of xray-pwc-net
+ansible-playbook xray-pwc-net-remove.yml -e name=<probe> -e purge=true   # and everything else here
 ```
 
 **Lost compose.yml:** run the join again. The address and the keys stay. A

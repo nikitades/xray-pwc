@@ -5,7 +5,9 @@
 
   {{ pwc_net_join_compose }}
 
-It is private: PWC_JOIN holds the probe's key. {{ 'The tunnel goes through the service links (outbound_access_policy: vpn).' if pwc_net_via else 'The tunnel goes straight to ' ~ pwc_net_endpoint ~ ' over UDP (outbound_access_policy: ' ~ outbound_access_policy ~ '). If the network blocks UDP, set outbound_access_policy: vpn for the probe in the inventory, put links into files/probes/' ~ inventory_hostname ~ '/service_links.txt and run this again before the first start: a probe whose tunnel never comes up cannot be reached to change it.' }}
+It is private: PWC_JOIN holds the probe's key. {{ 'The tunnel goes through the service links (outbound_access_policy: vpn).' if pwc_net_via else 'The tunnel goes straight to ' ~ pwc_net_endpoint ~ ' over UDP (outbound_access_policy: ' ~ outbound_access_policy ~ '). If the network blocks UDP, run this again with -e policy=vpn -e service_links="$(base64 < <links file>)" before the first start: a probe whose tunnel never comes up cannot be reached to change it.' }}
+
+The image is {{ aio_image }} (aio_target: {{ aio_target }}). If the machine cannot pull it, run this again with -e target={{ aio_registries | reject('eq', aio_target) | join('|') }}.
 
 1. On the machine (Linux, macOS or Windows with Docker), in a folder of its own:
      docker compose up -d
