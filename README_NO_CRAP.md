@@ -20,7 +20,7 @@ ansible-playbook xray-pwc-net-join.yml -e name=spb-home-1 -e policy=plain       
 ansible-playbook xray-pwc-net-join.yml -e name=spb-home-1 -e policy=relay              # long TCP stalls
 ansible-playbook xray-pwc-net-join.yml -e name=spb-home-1 -e policy=vpn \
   -e service_links="$(base64 < service_links.txt)"                                      # UDP blocked
-ansible-playbook xray-pwc-net-join.yml -e name=spb-home-1 -e policy=plain -e target=ru  # image from GitFlic (Russia)
+ansible-playbook xray-pwc-net-join.yml -e name=spb-home-1 -e policy=plain -e target=ru  # image from the ru registry
 ```
 
 Then send `files/xray-pwc-net/join/spb-home-1/compose.yml` to the owner, and:
@@ -86,8 +86,7 @@ git commit -am "release 2.1.0" && git tag v2.1.0 && git push && git push origin 
 ansible-playbook probes.yml       # after CI: every probe to the release
 ```
 
-CI pushes the image to GHCR and, with the repository variable `GITFLIC_IMAGE` and the
-secrets `GITFLIC_USER` and `GITFLIC_TOKEN`, to GitFlic too.
+CI pushes the image to GHCR.
 
 ## xray-pwc-connect alone
 

@@ -74,8 +74,7 @@ CI release (`release.yml`): `files` (check tag == VERSION, make test, make conne
 RELEASE=1, artifact) -> `build` matrix amd64 `ubuntu-24.04` / arm64 `ubuntu-24.04-arm`
 (make bundle; make image push-by-digest) -> `publish` (imagetools create X.Y.Z, X.Y, latest;
 make sums; `gh release create vX.Y.Z` with bundles, connect binaries, wheel, SHA256SUMS; push
-tag `xray-pwc-connect/vX.Y.Z`); with repo variable `GITFLIC_IMAGE` (+ secrets `GITFLIC_USER`,
-`GITFLIC_TOKEN`) also `imagetools create` copies X.Y.Z, X.Y, latest from GHCR to GitFlic. Go module path
+tag `xray-pwc-connect/vX.Y.Z`). Go module path
 ends in `/v2` (major version 2). `ci.yml`: make test; per arch make bundle and image (cacheonly).
 
 ## 5. Runtime topology
@@ -112,7 +111,7 @@ On the host: `compose.yml` + named volume `xray-pwc-aio_app` (= `/app`), nothing
 `compose.yml` (`templates/probe/compose.yml.j2`): image `aio_image` =
 `<aio_image_name | default aio_registries[aio_target]>:<aio_image_version>`; `aio_registries`
 (`group_vars/all.yml`): `us` = `ghcr.io/nikitades/xray-pwc-aio`, `ru` =
-`registry.gitflic.ru/project/nikitades/xray-pwc/xray-pwc-aio`; `aio_target` per probe (default `us`,
+`ghcr.io/nikitades/xray-pwc-aio` too for now (GHCR works from Russia); `aio_target` per probe (default `us`,
 written to inventory.d by the join's `-e target`)
 (`xray_pwc_release`, or VERSION when it is `local`), `hostname: <probe>`, `cap_add:
 NET_ADMIN`, `/dev/net/tun`, `shm_size: 512m`, `dns:` from `probe_dns`, env `PWC_JOIN`

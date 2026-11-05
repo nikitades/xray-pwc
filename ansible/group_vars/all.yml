@@ -52,9 +52,10 @@ pwc_net_via_port: 51974
 outbound_access_policies: [plain, relay, vpn]
 # Where the image is published (.github/workflows/release.yml), by where a probe
 # pulls it from: its aio_target (group_vars/probes.yml), the join's -e target.
-# A registry abroad can be slow or cut from inside Russia, hence one there too.
+# GHCR is reachable from Russia and pulls anonymously; a registry of its own goes
+# here when that changes (GitFlic dropped uploads of the larger layers).
 aio_registries:
   us: ghcr.io/nikitades/xray-pwc-aio
-  ru: registry.gitflic.ru/project/nikitades/xray-pwc/xray-pwc-aio
+  ru: ghcr.io/nikitades/xray-pwc-aio
 # Join files (compose.yml with the token) from xray-pwc-net-join.yml.
 pwc_net_join_dir: "{{ playbook_dir }}/files/xray-pwc-net/join"

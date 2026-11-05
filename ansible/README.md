@@ -153,7 +153,7 @@ ansible-playbook xray-pwc-net-join.yml -e name=probe-2 -e policy=plain
 # a network that blocks UDP to the server: the tunnel goes through these links
 ansible-playbook xray-pwc-net-join.yml -e name=probe-2 -e policy=vpn \
   -e service_links="$(base64 < my-service-links.txt)"
-# a machine in Russia: the image from GitFlic, not GHCR
+# a machine in Russia: the image from the ru registry (aio_registries)
 ansible-playbook xray-pwc-net-join.yml -e name=probe-2 -e policy=plain -e target=ru
 ```
 
@@ -187,7 +187,7 @@ docker compose logs -f               # wait for: wg INFO handshake_ok
 ```
 
 The image is the release's, from the registry of the probe's `aio_target`:
-`us` (GHCR, the default) or `ru` (GitFlic, for machines in Russia), see
+`us` (the default) or `ru` (for machines in Russia; GHCR too for now), see
 `aio_registries` in `group_vars/all.yml`. Pick it at the join with
 `-e target=ru`; a rerun keeps the probe's target. Then put the links to check into
 `files/probes/probe-2/links.txt` (step 5) and:

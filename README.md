@@ -171,9 +171,6 @@ A release is a tag: raise `VERSION`, merge, and push `vX.Y.Z`. CI
   `SHA256SUMS`;
 - the image `ghcr.io/nikitades/xray-pwc-aio:X.Y.Z` (also `X.Y` and
   `latest`), amd64 and arm64, built from the same wheel and binaries;
-- the same image in GitFlic, `registry.gitflic.ru/.../xray-pwc-aio`, for
-  probes in Russia (`-e target=ru` at the join), when the repository variable
-  `GITFLIC_IMAGE` and the secrets `GITFLIC_USER`, `GITFLIC_TOKEN` are set;
 - the tag `xray-pwc-connect/vX.Y.Z`, so that
   `go install github.com/nikitades/xray-pwc/xray-pwc-connect/v2/cmd/xray-pwc-connect@latest`
   (or `@vX.Y.Z`) installs it.
