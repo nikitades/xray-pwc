@@ -53,6 +53,11 @@ pwc_net_join_token: "{{ pwc_net_join_data | to_json | b64encode | replace('+', '
 
 pwc_check_interval: PT5M
 pwc_check_jitter: PT2M
+# How the checker loads pages (PWC_CHECK_POLICY), set per probe by the join (-e check=):
+#   heavy  Chromium, pages as a person sees them; wants a gigabyte or more of memory
+#   light  curl_cffi: Chrome's TLS and HTTP/2 fingerprint, no JavaScript, tens of
+#          megabytes; for small hosts such as a Raspberry Pi
+check_policy: heavy
 
 # files/probes/<hostname>/*: share links, one per line; all files are joined into one links.txt.
 # service_links.txt is not one of them: it is for the probe's own traffic (pwc_net_service_links).

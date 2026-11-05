@@ -21,6 +21,7 @@ ansible-playbook xray-pwc-net-join.yml -e name=spb-home-1 -e policy=relay       
 ansible-playbook xray-pwc-net-join.yml -e name=spb-home-1 -e policy=vpn \
   -e service_links="$(base64 < service_links.txt)"                                      # UDP blocked
 ansible-playbook xray-pwc-net-join.yml -e name=spb-home-1 -e policy=plain -e target=ru  # image from the ru registry
+ansible-playbook xray-pwc-net-join.yml -e name=spb-home-1 -e policy=plain -e check=light # no Chromium: a small host
 ```
 
 Then send `files/xray-pwc-net/join/spb-home-1/compose.yml` to the owner, and:
@@ -47,6 +48,7 @@ ansible-playbook probes.yml                                          # everythin
 ansible-playbook probes.yml --limit spb-home-1                       # one probe (links, policy)
 ansible-playbook probes.yml --limit spb-home-1 -e xray_pwc_release=local   # try the working tree
 ansible-playbook probes.yml --check --diff                           # what would change
+$EDITOR inventory.d/spb-home-1.yml && ansible-playbook probes.yml --limit spb-home-1   # check_policy: light|heavy
 ansible-playbook xray-pwc-net-join.yml -e name=spb-home-1 -e policy=plain  # lost compose.yml: same keys, new token
 ```
 
@@ -102,4 +104,5 @@ xray-pwc-connect -forward vpn.example.com:51973 -start-port 51974 -stdin-links <
 uv tool install https://github.com/nikitades/xray-pwc/releases/download/vX.Y.Z/xray_pwc_probe-X.Y.Z-py3-none-any.whl
 uvx --from playwright playwright install chromium
 PWC_CONFIG_PATH=links.txt xray-pwc-probe   # metrics on :8000
+PWC_CONFIG_PATH=links.txt PWC_CHECK_POLICY=light xray-pwc-probe   # no Chromium needed
 ```

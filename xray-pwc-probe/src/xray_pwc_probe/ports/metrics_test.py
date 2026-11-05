@@ -2,7 +2,7 @@ import pytest
 from attrs import frozen
 
 from xray_pwc_probe.domain.entities import SocksTunnel, TunnelCheck, VpnConfigLine
-from xray_pwc_probe.domain.sites import HeavySite, SiteVisit, SiteVisitError
+from xray_pwc_probe.domain.sites import CheckPolicy, HeavySite, SiteVisit, SiteVisitError
 from xray_pwc_probe.ports.metrics import PrometheusMetrics
 
 WIKIPEDIA = HeavySite.at("https://en.wikipedia.org/wiki/Special:Random")
@@ -34,7 +34,8 @@ class Scrape:
     def stage(self, config: VpnConfigLine) -> float | None:
         labels = {"instance": self.metrics.instance, "tunnel": config.code}
         return self.metrics.registry.get_sample_value(
-            "xray_pwc_tunnel_stage", labels | {"stable_id": config.stable_id}
+            "xray_pwc_tunnel_stage",
+            labels | {"stable_id": config.stable_id, "check_policy": self.metrics.check_policy},
         )
 
     def errors(self, config: VpnConfigLine) -> dict[str, float]:
@@ -46,6 +47,7 @@ class Scrape:
             and sample.labels["tunnel"] == config.code
             and sample.labels["stable_id"] == config.stable_id
             and sample.labels["instance"] == self.metrics.instance
+            and sample.labels["check_policy"] == self.metrics.check_policy
         }
 
 
@@ -131,3 +133,10 @@ def test_errors_of_tunnels_removed_from_the_config_disappear():
     assert Scrape(metrics).errors(SPB) == {}
     metrics.record([MSK_HEALTHY, SPB_HEALTHY])
     assert Scrape(metrics).errors(SPB) == {}
+
+
+def test_every_series_carries_the_check_policy():
+    metrics = PrometheusMetrics(port=0, instance="probe-1", check_policy=CheckPolicy.LIGHT)
+    metrics.record([SPB_RESET])
+    assert Scrape(metrics).stage(SPB) == 2
+    assert Scrape(metrics).errors(SPB) == {"ERR_CONNECTION_RESET": 1, "ERR_TIMED_OUT": 1}

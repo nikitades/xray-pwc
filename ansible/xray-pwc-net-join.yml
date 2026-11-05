@@ -3,10 +3,12 @@
 #   a probe:      ansible-playbook xray-pwc-net-join.yml -e name=<name> -e policy=<plain|relay|vpn>
 #                 with policy=vpn also -e service_links=<base64 of the links, one per line>
 #                 [-e target=<us|ru>]: the registry its image comes from (default us)
+#                 [-e check=<heavy|light>]: how its checker loads pages (default heavy)
 #   the server:   ansible-playbook xray-pwc-net-join.yml -e name=<the monitoring host>
-# policy is the probe's outbound_access_policy, target its aio_target (group_vars/probes.yml).
+# policy is the probe's outbound_access_policy, target its aio_target, check its
+# check_policy (group_vars/probes.yml).
 # Writes host_vars/<name>/xray-pwc-net.yml (address and keys). For a probe it also writes
-# inventory.d/<name>.yml with the policy and the target, files/probes/<name>/service_links.txt from
+# inventory.d/<name>.yml with the policy, the target and the check, files/probes/<name>/service_links.txt from
 # service_links, and empty links.txt and service_links.txt, unless they are there,
 # tells the server, and makes
 # files/xray-pwc-net/join/<name>/compose.yml: the probe's container with its join token,
@@ -34,6 +36,8 @@
     join_service_links: "{{ (service_links | default('') | b64decode).splitlines() | map('trim') | reject('match', '^(#|$)') | list }}"
     # -e target, else what the inventory has for the probe (a rerun keeps it), else us.
     join_target: "{{ target | default((hostvars[name] | default({})).aio_target | default('us')) }}"
+    # -e check, else what the inventory has for the probe, else heavy.
+    join_check: "{{ check | default((hostvars[name] | default({})).check_policy | default('heavy')) }}"
 
   tasks:
     - name: Check parameters
@@ -65,6 +69,16 @@
         quiet: true
       when: join_probe
 
+    - name: Check check policy
+      ansible.builtin.assert:
+        that:
+          - join_check in check_policies
+        fail_msg: >-
+          -e check=<{{ check_policies | join('|') }}>: how the probe's checker loads pages,
+          its check_policy (group_vars/probes.yml); heavy when not given
+        quiet: true
+      when: join_probe
+
     - name: Check service links
       ansible.builtin.assert:
         that:
@@ -89,10 +103,12 @@
         that:
           - hostvars[name].outbound_access_policy == policy
           - hostvars[name].aio_target == join_target
+          - hostvars[name].check_policy == join_check
         fail_msg: >-
           {{ name }} is in inventory.yml with outbound_access_policy:
-          {{ hostvars[name].outbound_access_policy }} and aio_target: {{ hostvars[name].aio_target }}:
-          change them there, or pass -e policy= and -e target= to match
+          {{ hostvars[name].outbound_access_policy }}, aio_target: {{ hostvars[name].aio_target }}
+          and check_policy: {{ hostvars[name].check_policy }}: change them there, or pass
+          -e policy=, -e target= and -e check= to match
         quiet: true
       when: join_probe and name in groups['all'] and not join_inventory_file.stat.exists
 

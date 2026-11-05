@@ -2,10 +2,10 @@ import pytest
 from attrs import frozen
 
 from xray_pwc_probe.domain.entities import Reach, SocksTunnel, TunnelCheck, VpnConfigLine
-from xray_pwc_probe.domain.sites import HeavySite, LightSite, Site, SiteVisit, SiteVisitError
+from xray_pwc_probe.domain.sites import HeavySite, Site, SiteVisit, SiteVisitError, TargetSite
 
 WIKIPEDIA = HeavySite.at("https://en.wikipedia.org/wiki/Special:Random")
-INSTAGRAM = LightSite.at("https://www.instagram.com/")
+INSTAGRAM = TargetSite.at("https://www.instagram.com/")
 
 MSK = VpnConfigLine.from_str("vless://u@msk.example:443?security=tls#msk")
 

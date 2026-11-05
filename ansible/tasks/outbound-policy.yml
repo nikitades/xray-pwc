@@ -14,3 +14,12 @@
          if outbound_access_policy == 'vpn' else
          'outbound_access_policy of ' ~ inventory_hostname ~ ' is ' ~ outbound_access_policy ~ ', must be one of ' ~ outbound_access_policies | join(', ') }}
     quiet: true
+
+- name: Check check policy
+  ansible.builtin.assert:
+    that:
+      - check_policy in check_policies
+    fail_msg: >-
+      check_policy of {{ inventory_hostname }} is {{ check_policy }}, must be one of
+      {{ check_policies | join(', ') }}
+    quiet: true

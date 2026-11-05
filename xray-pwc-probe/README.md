@@ -20,6 +20,21 @@ Every few minutes, one round:
 4. After the last link the tunnels are closed. The next round starts with
    fresh tunnels.
 
+How pages are loaded is the **check policy**, `PWC_CHECK_POLICY`:
+
+| policy | loads pages with | heavy sites | memory |
+|---|---|---|---|
+| `heavy` (default) | headless Chromium, as a person would | `PWC_HEAVY_SITES_REAL` | hundreds of MB, more on big pages |
+| `light` | [curl_cffi](https://github.com/lexiforest/curl_cffi): Chrome's TLS and HTTP/2 fingerprint, no JavaScript | `PWC_HEAVY_SITES_CFFI` | tens of MB |
+
+`light` is for small hosts, such as a Raspberry Pi with 1 GB, where Chromium
+does not fit. To the network it looks like Chrome; it does not run pages'
+scripts, so its heavy sites are ones that are big without them (Wikipedia,
+a Cloudflare speed test file). A URL in both heavy lists, character for
+character, is used by both policies. Target sites are the same for both. A
+policy with no heavy sites of its own (and `PWC_HEAVY_VISITS` above 0) stops
+the checker at start.
+
 Every page gets up to three tries. The wait between tries doubles: 2 s, then
 4 s.
 
@@ -29,6 +44,7 @@ Every page gets up to three tries. The wait between tries doubles: 2 s, then
 |---|---|---|
 | heavy site | the page reached `DOMContentLoaded` | we want its bytes to pass through the tunnel |
 | target site | the response is HTTP `200` | a login wall is fine: it proves the site is reachable |
+| any site, `light` | HTTP `2xx` and a body over 16 KB | past the point where DPI stalls a flow |
 
 ### The result for a link
 
@@ -98,7 +114,7 @@ time and the service name are put in front. One line on start, then one per
 link after every check, with `result` and `stage` as in the metrics:
 
 ```
-INFO start version=1.1.0 instance=probe-1 links=3 interval=PT5M jitter=PT2M
+INFO start version=2.1.0 instance=probe-1 links=3 interval=PT5M jitter=PT2M check_policy=heavy
 INFO check index=0 name=msk-reality result=ok stage=3
 WARN check index=1 name=spb-ws result=partial stage=2 failed="instagram.com: HTTP 429, thesun.co.uk: ERR_CONNECTION_RESET"
 ERROR check index=2 name=backup result=link_broken stage=0 failed="tunnel: unsupported share format"
@@ -124,7 +140,9 @@ Every error is logged by its own name, never grouped with similar ones:
 | error | what happened |
 |---|---|
 | `ERR_...` | Chromium's network error code as is, for example `ERR_CONNECTION_RESET`, `ERR_CONNECTION_CLOSED`, `ERR_EMPTY_RESPONSE`, `ERR_PROXY_CONNECTION_FAILED`, `ERR_SSL_PROTOCOL_ERROR` |
-| `timeout` | the page did not load in time and Chromium reported no error |
+| `timeout` | the page did not load in time and Chromium reported no error; with `light`, curl's timeout |
+| `CURLE_...` | with `light`: libcurl's error, for example `CURLE_COULDNT_CONNECT` (the SOCKS connection was refused), `CURLE_RECV_ERROR`, `CURLE_SSL_CONNECT_ERROR`; `CURLE_<code>` for a code without a name |
+| `short_body` | with `light`: the site answered `2xx` with 16 KB or less |
 | `HTTP 429` | the site answered, but not with `200` |
 | anything else | an error the checker does not know, printed in full |
 
@@ -134,8 +152,8 @@ On `http://<host>:8000/metrics`, one series per link. The value is the stage
 from the table above:
 
 ```
-xray_pwc_tunnel_stage{instance="probe-1",tunnel="msk-reality",stable_id="3f9c..."} 3
-xray_pwc_tunnel_stage{instance="probe-1",tunnel="spb-ws",stable_id="8a01..."} 2
+xray_pwc_tunnel_stage{instance="probe-1",tunnel="msk-reality",stable_id="3f9c...",check_policy="heavy"} 3
+xray_pwc_tunnel_stage{instance="probe-1",tunnel="spb-ws",stable_id="8a01...",check_policy="heavy"} 2
 ```
 
 - `instance`: the name of this probe (`PWC_INSTANCE`). Compare probes to see
@@ -143,6 +161,8 @@ xray_pwc_tunnel_stage{instance="probe-1",tunnel="spb-ws",stable_id="8a01..."} 2
 - `tunnel`: the link's name, the text after `#` in the link.
 - `stable_id`: a hash of the link without its name. Renaming a link does not
   break its history in Prometheus.
+- `check_policy`: `heavy` or `light`. A site may answer Chromium and plain
+  requests differently, so results of the two are kept apart.
 
 The series stays the same when the stage changes, so graphs never break.
 
@@ -190,7 +210,9 @@ All settings are environment variables, and all are optional.
 |---|---|---|
 | `PWC_CONFIG_PATH` | `config.txt` | file with share links, one per line, `#` for comments |
 | `PWC_INSTANCE` | hostname | this probe's name in metrics and logs |
-| `PWC_HEAVY_SITES` | Wikipedia random page, The Sun, site123 examples | JSON list of URLs |
+| `PWC_CHECK_POLICY` | `heavy` | `heavy` (Chromium) or `light` (curl_cffi), see above |
+| `PWC_HEAVY_SITES_REAL` | Wikipedia random page, The Sun, site123 examples | JSON list of URLs, heavy sites for `heavy` |
+| `PWC_HEAVY_SITES_CFFI` | Wikipedia random page, Wikipedia's list of sovereign states, 1 MB from `speed.cloudflare.com` | JSON list of URLs, heavy sites for `light` |
 | `PWC_HEAVY_VISITS` | `3` | how many random heavy sites to open per check; `0` skips them |
 | `PWC_TARGET_SITES` | Instagram, Facebook | JSON list of URLs, all opened every check |
 | `PWC_CHECK_INTERVAL` | `PT5M` | time between checks, ISO 8601 |

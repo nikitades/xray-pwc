@@ -50,6 +50,8 @@ pwc_net_via_links: "{{ (pwc_net_via_lines | join('\n') ~ '\n') if pwc_net_via an
 pwc_net_via_port: 51974
 # The values of outbound_access_policy (group_vars/probes.yml).
 outbound_access_policies: [plain, relay, vpn]
+# The values of check_policy (group_vars/probes.yml).
+check_policies: [heavy, light]
 # Where the image is published (.github/workflows/release.yml), by where a probe
 # pulls it from: its aio_target (group_vars/probes.yml), the join's -e target.
 # GHCR is reachable from Russia and pulls anonymously; a registry of its own goes

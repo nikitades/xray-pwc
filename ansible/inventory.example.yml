@@ -29,3 +29,6 @@ all:
           # default), relay or vpn; see group_vars/probes.yml. vpn takes the links in
           # files/probes/probe-1/service_links.txt, for networks that block UDP.
           # outbound_access_policy: vpn
+          # Optional: heavy (Chromium, the default) or light (no browser, for hosts
+          # with little memory); see group_vars/probes.yml.
+          # check_policy: light

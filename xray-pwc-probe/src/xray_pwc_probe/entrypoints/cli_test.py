@@ -8,6 +8,7 @@ from lagom import Container
 
 from xray_pwc_probe.app import Browser, TunnelMetrics, XrayPwcConnect
 from xray_pwc_probe.domain.entities import VpnConfigLine
+from xray_pwc_probe.domain.sites import CheckPolicy
 from xray_pwc_probe.entrypoints.cli import CliApp, Settings
 from xray_pwc_probe.fakes import FakeBrowser, FakeMetrics, FakeXrayPwcConnect
 
@@ -18,6 +19,7 @@ def test_defaults():
     assert s.instance == socket.gethostname()
     assert (s.check_interval.total_seconds(), s.check_jitter.total_seconds()) == (300, 120)
     assert s.connect_bin is None
+    assert s.check_policy is CheckPolicy.HEAVY
 
 
 def test_env_overrides(monkeypatch):
@@ -107,7 +109,7 @@ async def test_cli_app_introduces_itself_then_checks_until_stopped(container: Co
     assert metrics.serving
     intro, *results = capsys.readouterr().err.splitlines()
     assert intro.startswith("INFO start version=")
-    assert intro.endswith(" links=2 interval=PT5M jitter=PT2M")
+    assert intro.endswith(" links=2 interval=PT5M jitter=PT2M check_policy=heavy")
     assert results == [
         "INFO check index=0 name=msk result=ok stage=3",
         "INFO check index=1 name=spb result=ok stage=3",
@@ -126,12 +128,27 @@ def test_instance_comes_from_the_environment(monkeypatch):
     assert Settings().instance == "spb-probe-1"
 
 
+def test_check_policy_comes_from_the_environment(monkeypatch):
+    monkeypatch.setenv("PWC_CHECK_POLICY", "light")
+    assert Settings().check_policy is CheckPolicy.LIGHT
+
+
+def test_unknown_check_policy_is_refused(monkeypatch):
+    monkeypatch.setenv("PWC_CHECK_POLICY", "medium")
+    with pytest.raises(ValueError):
+        Settings()
+
+
 def test_sites_are_configurable_as_json_lists(monkeypatch):
-    monkeypatch.setenv("PWC_HEAVY_SITES", '["https://example.com/big-page"]')
+    monkeypatch.setenv("PWC_HEAVY_SITES_REAL", '["https://example.com/big-page"]')
+    monkeypatch.setenv("PWC_HEAVY_SITES_CFFI", '["https://example.com/big-file"]')
     monkeypatch.setenv("PWC_TARGET_SITES", '["https://www.youtube.com/watch?v=x", "https://t.me/"]')
     monkeypatch.setenv("PWC_HEAVY_VISITS", "5")
     catalog = Settings().get_site_catalog()
-    assert [s.url for s in catalog.heavy] == ["https://example.com/big-page"]
+    assert {s.url: s.tags for s in catalog.heavy} == {
+        "https://example.com/big-page": {CheckPolicy.HEAVY},
+        "https://example.com/big-file": {CheckPolicy.LIGHT},
+    }
     assert [s.name for s in catalog.targets] == ["youtube.com", "t.me"]
     assert catalog.targets[0].url == "https://www.youtube.com/watch?v=x"
     assert catalog.heavy_visits == 5
@@ -140,8 +157,19 @@ def test_sites_are_configurable_as_json_lists(monkeypatch):
 def test_defaults_open_three_heavy_pages_then_instagram_and_facebook():
     catalog = Settings().get_site_catalog()
     assert catalog.heavy_visits == 3
-    assert [s.name for s in catalog.heavy] == ["en.wikipedia.org", "thesun.co.uk", "site123.com"]
     assert [s.name for s in catalog.targets] == ["instagram.com", "facebook.com"]
+    heavy = catalog.for_policy(CheckPolicy.HEAVY).heavy
+    assert [s.name for s in heavy] == ["en.wikipedia.org", "thesun.co.uk", "site123.com"]
+
+
+def test_light_defaults_are_wikipedia_and_cloudflare():
+    heavy = Settings().get_site_catalog().for_policy(CheckPolicy.LIGHT).heavy
+    assert [s.url for s in heavy] == [
+        "https://en.wikipedia.org/wiki/Special:Random",
+        "https://en.wikipedia.org/wiki/List_of_sovereign_states",
+        "https://speed.cloudflare.com/__down?bytes=1000000",
+    ]
+    assert heavy[0].tags == {CheckPolicy.HEAVY, CheckPolicy.LIGHT}
 
 
 def test_site_urls_are_validated(monkeypatch):

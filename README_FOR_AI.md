@@ -172,35 +172,48 @@ One round every `PWC_CHECK_INTERVAL` (PT5M) + random `PWC_CHECK_JITTER` (PT2M):
 
 1. One xray-pwc-connect process for the round: SOCKS tunnels for all links at once
    (links via stdin, not argv; `-xray-log-level error`).
-2. Per link, sequentially, a fresh browser (one Chromium at a time): open `PWC_HEAVY_VISITS`
-   (3) random URLs from `PWC_HEAVY_SITES`; success = `DOMContentLoaded`.
-3. Open all `PWC_TARGET_SITES` (Instagram, Facebook); success = HTTP 200.
+2. Per link, sequentially, a fresh browser (one at a time): open `PWC_HEAVY_VISITS`
+   (3) random heavy sites of the check policy; heavy: success = `DOMContentLoaded`.
+3. Open all `PWC_TARGET_SITES` (Instagram, Facebook); heavy: success = HTTP 200.
 4. After the last link: close the tunnels.
+
+Check policy `PWC_CHECK_POLICY` (`domain/sites.py` `CheckPolicy`): `heavy` (default) =
+Playwright Chromium (`ports/browser.py`); `light` = curl_cffi, `impersonate="chrome"`, proxy
+`socks5h://`, no JS, tens of MB (`ports/curl_browser.py`), success for every site = 2xx and
+body > 16 KB (`MIN_BODY_BYTES`). Heavy sites: `PWC_HEAVY_SITES_REAL` (tag heavy) and
+`PWC_HEAVY_SITES_CFFI` (tag light, defaults Wikipedia random + List_of_sovereign_states +
+`speed.cloudflare.com/__down?bytes=1000000`) merged by exact URL into one list of
+`HeavySite(tags)`; `SiteCatalog.for_policy` keeps the policy's; none with heavy_visits > 0 ->
+ValueError at start (`container.build_browser`). Targets for both. Shared retry/visit code:
+`ports/visiting.py` (`Backoff`, `VisitingSession`; adapters raise `VisitFailed`).
 
 Each page: 3 attempts, 30 s navigation timeout, backoff 2 s, 4 s.
 
 Stage (`xray_pwc_tunnel_stage`): 0 link broken, 1 unreachable (no proof traffic passed),
 2 partial, 3 all OK. Proof of passage: page opened, any HTTP status, TLS handshake
-failure. Not proof: `ERR_PROXY_CONNECTION_FAILED`, timeout, reset, DNS error.
+failure (curl 35, 60), `short_body`. Not proof: `ERR_PROXY_CONNECTION_FAILED`,
+`CURLE_COULDNT_CONNECT`, timeout (curl 28 too), reset, DNS error. curl errors log as
+`CURLE_<NAME>` / `CURLE_<code>`.
 Log per link: `check index name result(ok|partial|unreachable|link_broken) stage [failed="..."]`,
-INFO / WARN / ERROR; `start version instance links interval jitter`; `connect_unavailable`
+INFO / WARN / ERROR; `start version instance links interval jitter check_policy`; `connect_unavailable`
 ERROR exits (missing, or another X.Y.Z); `round_failed err` ERROR = `XrayPwcConnectFailed`
 in a round (no report, port taken): round skipped, metrics unchanged, loop goes on.
 
-Metrics on :8000: `xray_pwc_tunnel_stage{instance,tunnel,stable_id}`;
-`xray_pwc_tunnel_error{...,error_type}` = 1 if last check hit it, 0 if only earlier.
+Metrics on :8000: `xray_pwc_tunnel_stage{instance,tunnel,stable_id,check_policy}`;
+`xray_pwc_tunnel_error{...,error_type,check_policy}` = 1 if last check hit it, 0 if only earlier.
 (Before 1.1.0: `pwc_tunnel_*`; old series stay in Prometheus.) `instance` = `PWC_INSTANCE`
 = inventory hostname; `tunnel` = text after `#`; `stable_id` = hash of link without name.
 Alloy adds `job="xray-pwc-probe"`, `host`; node metrics get `job="node"`, `instance=<probe>`.
 
-Env: `PWC_CONFIG_PATH`, `PWC_INSTANCE`, `PWC_HEAVY_SITES`, `PWC_HEAVY_VISITS`,
+Env: `PWC_CONFIG_PATH`, `PWC_INSTANCE`, `PWC_CHECK_POLICY`, `PWC_HEAVY_SITES_REAL`,
+`PWC_HEAVY_SITES_CFFI` (`PWC_HEAVY_SITES` before 2.1.0), `PWC_HEAVY_VISITS`,
 `PWC_TARGET_SITES`, `PWC_CHECK_INTERVAL`, `PWC_CHECK_JITTER`, `PWC_HTTP_PORT`,
 `PWC_CONNECT_BIN` (else `$GOBIN` if set, otherwise `$GOPATH/bin` (~/go/bin); then `PATH`).
 Install: wheel from the GitHub release (`uv tool install <url>` / pip); connect via
 `go install ...@vX.Y.Z` or the release's binaries.
 
 Architecture: hexagonal. `domain/` entities, release, sites, schedule; `app/` use cases +
-Protocol ports; `ports/` adapters (Playwright browser, Prometheus metrics, xray-pwc-connect
+Protocol ports; `ports/` adapters (Playwright and curl_cffi browsers, Prometheus metrics, xray-pwc-connect
 process, stderr relayed through `log.relayed`); `entrypoints/cli.py`; `container.py`;
 `fakes.py`. Dev: `uv run pytest`, `uv run ruff check .`, `uvx ty check src`.
 
@@ -307,7 +320,7 @@ for `xray_pwc_release: local` and `make tool`: Docker with buildx, Go, uv.
 | command | does |
 |---|---|
 | `ansible-playbook monitoring.yml` | xray-pwc-net server, Prometheus, Grafana, CoreDNS, Caddy |
-| `ansible-playbook xray-pwc-net-join.yml -e name=<n> -e policy=<plain\|relay\|vpn> [-e service_links=<base64>] [-e target=<us\|ru>]` | probe: policy required, service_links required with vpn; target = registry of the image in compose.yml (default: the inventory's `aio_target`, else us); address, keys, inventory.d with the policy and `aio_target` (kept in inventory.yml if the probe is set there: must match), service_links.txt from service_links, empty link files, server update, compose.yml; server name: keys only (the server play's `hosts` is `none` then) |
+| `ansible-playbook xray-pwc-net-join.yml -e name=<n> -e policy=<plain\|relay\|vpn> [-e service_links=<base64>] [-e target=<us\|ru>] [-e check=<heavy\|light>]` | probe: policy required, service_links required with vpn; target = registry of the image in compose.yml (default: the inventory's `aio_target`, else us); check = `check_policy`, written to probe.env by probes.yml (default: the inventory's, else heavy); address, keys, inventory.d with the policy, `aio_target` and `check_policy` (kept in inventory.yml if the probe is set there: must match), service_links.txt from service_links, empty link files, server update, compose.yml; server name: keys only (the server play's `hosts` is `none` then) |
 | `ansible-playbook probes.yml [--limit p] [-e xray_pwc_release=local]` | in the container, as abc: the release, tools, state files, switch, prune |
 | `ansible-playbook xray-pwc-net-remove.yml -e name=<n>` | forget member (host_vars, inventory.d, join dir), update server; links and inventory.yml stay. `-e purge=true`: also files/probes/<n>, its block in inventory.yml (scripts/inventory-drop-host.py, keeps comments), known_hosts by address and name. Prometheus data stays; the container stays until its owner removes it |
 

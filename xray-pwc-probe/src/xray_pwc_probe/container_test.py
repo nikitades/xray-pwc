@@ -1,12 +1,16 @@
 from pathlib import Path
 
+import pytest
+
 from xray_pwc_probe.app import Browser, MetricsServer, TunnelMetrics, XrayPwcConnect
 from xray_pwc_probe.app.xray_pwc_connect_version import CheckXrayPwcConnectVersionUsecase
 from xray_pwc_probe.container import build_container, build_test_container
 from xray_pwc_probe.domain.schedule import CheckSchedule
+from xray_pwc_probe.domain.sites import CheckPolicy
 from xray_pwc_probe.entrypoints.cli import CliApp, Settings
 from xray_pwc_probe.fakes import FakeBrowser, FakeMetrics, FakeXrayPwcConnect
 from xray_pwc_probe.ports.browser import PlaywrightBrowser
+from xray_pwc_probe.ports.curl_browser import CurlBrowser
 from xray_pwc_probe.ports.metrics import PrometheusMetrics
 from xray_pwc_probe.ports.xray_pwc_connect import XrayPwcConnectCli
 
@@ -20,6 +24,22 @@ def test_production_container_uses_real_adapters_configured_from_settings():
     metrics = container[TunnelMetrics]
     assert isinstance(metrics, PrometheusMetrics)
     assert (metrics.port, metrics.instance) == (9321, "probe-1")
+    assert metrics.check_policy is CheckPolicy.HEAVY
+
+
+def test_light_check_policy_loads_pages_with_curl_cffi():
+    container = build_container(Settings(check_policy=CheckPolicy.LIGHT))
+    browser = container[Browser]
+    assert isinstance(browser, CurlBrowser)
+    assert all(CheckPolicy.LIGHT in site.tags for site in browser.catalog.heavy)
+    metrics = container[TunnelMetrics]
+    assert isinstance(metrics, PrometheusMetrics)
+    assert metrics.check_policy is CheckPolicy.LIGHT
+
+
+def test_a_check_policy_without_heavy_sites_fails_at_start():
+    with pytest.raises(ValueError, match="check policy light has no heavy sites"):
+        build_container(Settings(check_policy=CheckPolicy.LIGHT, heavy_sites_cffi=()))
 
 
 def test_metrics_are_recorded_and_served_by_the_same_object():

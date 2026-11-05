@@ -155,6 +155,8 @@ ansible-playbook xray-pwc-net-join.yml -e name=probe-2 -e policy=vpn \
   -e service_links="$(base64 < my-service-links.txt)"
 # a machine in Russia: the image from the ru registry (aio_registries)
 ansible-playbook xray-pwc-net-join.yml -e name=probe-2 -e policy=plain -e target=ru
+# a host with little memory (a Raspberry Pi): pages without Chromium
+ansible-playbook xray-pwc-net-join.yml -e name=probe-2 -e policy=plain -e check=light
 ```
 
 `policy` is required for a probe, one of `plain`, `relay` and `vpn` (step 5);
@@ -228,6 +230,11 @@ build them in the Grafana UI.
 ```bash
 ansible-playbook probes.yml --limit <probe>
 ```
+
+**Change `check_policy`** (`heavy`, Chromium, or `light`, no browser, for
+hosts with little memory; see the [xray-pwc-probe README](../xray-pwc-probe/README.md)):
+set it in `inventory.d/<probe>.yml` (or `inventory.yml`), then `probes.yml`
+as above. Unlike the next two, nothing can go wrong with the connection.
 
 **Change service links or `outbound_access_policy`:** the same. Mind that
 the tunnel moves to the new settings: if they do not work, the probe is out

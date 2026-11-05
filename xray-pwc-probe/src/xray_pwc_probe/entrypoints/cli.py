@@ -23,7 +23,7 @@ from xray_pwc_probe.app.xray_pwc_connect_version import (
 )
 from xray_pwc_probe.domain.entities import TunnelCheck, VpnConfigLine
 from xray_pwc_probe.domain.schedule import CheckSchedule
-from xray_pwc_probe.domain.sites import SiteCatalog
+from xray_pwc_probe.domain.sites import CheckPolicy, SiteCatalog
 from xray_pwc_probe.log import ERROR, INFO, log
 
 
@@ -36,10 +36,19 @@ class Settings(BaseSettings):
     http_port: int = 8000
     check_interval: timedelta = timedelta(minutes=5)
     check_jitter: timedelta = timedelta(minutes=2)
-    heavy_sites: tuple[HttpUrl, ...] = (
+    check_policy: CheckPolicy = CheckPolicy.HEAVY
+    # Heavy sites for Chromium (check_policy heavy): pages as a person sees them.
+    heavy_sites_real: tuple[HttpUrl, ...] = (
         HttpUrl("https://en.wikipedia.org/wiki/Special:Random"),
         HttpUrl("https://www.thesun.co.uk/"),
         HttpUrl("https://www.site123.com/website-examples"),
+    )
+    # Heavy sites for check_policy light: big without JavaScript. A URL in both lists
+    # is one site for both policies.
+    heavy_sites_cffi: tuple[HttpUrl, ...] = (
+        HttpUrl("https://en.wikipedia.org/wiki/Special:Random"),
+        HttpUrl("https://en.wikipedia.org/wiki/List_of_sovereign_states"),
+        HttpUrl("https://speed.cloudflare.com/__down?bytes=1000000"),
     )
     heavy_visits: int = Field(default=3, ge=0)
     target_sites: tuple[HttpUrl, ...] = (
@@ -53,7 +62,8 @@ class Settings(BaseSettings):
 
     def get_site_catalog(self) -> SiteCatalog:
         return SiteCatalog.from_urls(
-            heavy=[str(url) for url in self.heavy_sites],
+            heavy_real=[str(url) for url in self.heavy_sites_real],
+            heavy_cffi=[str(url) for url in self.heavy_sites_cffi],
             targets=[str(url) for url in self.target_sites],
             heavy_visits=self.heavy_visits,
         )
@@ -129,6 +139,7 @@ class CliApp:
             "links": len(configs),
             "interval": self.schedule.interval_iso(),
             "jitter": self.schedule.jitter_iso(),
+            "check_policy": self.settings.check_policy,
         }
 
     def stop(self) -> None:

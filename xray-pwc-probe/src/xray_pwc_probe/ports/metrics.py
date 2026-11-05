@@ -5,12 +5,15 @@ from prometheus_client import CollectorRegistry, Gauge, start_http_server
 
 from xray_pwc_probe.app import MetricsServer, TunnelMetrics
 from xray_pwc_probe.domain.entities import TunnelCheck
+from xray_pwc_probe.domain.sites import CheckPolicy
 
 
 @frozen
 class PrometheusMetrics(MetricsServer, TunnelMetrics):
     port: int
     instance: str
+    # A label of every series: Chromium and plain requests may see a site differently.
+    check_policy: CheckPolicy = CheckPolicy.HEAVY
     host: str = "0.0.0.0"
     registry: CollectorRegistry = field(factory=CollectorRegistry, eq=False)
     tunnel_stage: Gauge = field(
@@ -20,7 +23,7 @@ class PrometheusMetrics(MetricsServer, TunnelMetrics):
             lambda self: Gauge(
                 "xray_pwc_tunnel_stage",
                 "How far the last check got: 0 link broken, 1 unreachable, 2 partial, 3 complete",
-                ["instance", "tunnel", "stable_id"],
+                ["instance", "tunnel", "stable_id", "check_policy"],
                 registry=self.registry,
             ),
             takes_self=True,
@@ -34,7 +37,7 @@ class PrometheusMetrics(MetricsServer, TunnelMetrics):
             lambda self: Gauge(
                 "xray_pwc_tunnel_error",
                 "1 if the last check met this kind of error, 0 if an earlier check did",
-                ["instance", "tunnel", "stable_id", "error_type"],
+                ["instance", "tunnel", "stable_id", "error_type", "check_policy"],
                 registry=self.registry,
             ),
             takes_self=True,
@@ -50,9 +53,9 @@ class PrometheusMetrics(MetricsServer, TunnelMetrics):
         self.tunnel_stage.clear()
         for check in checks:
             config = check.tunnel.config
-            self.tunnel_stage.labels(self.instance, config.code, config.stable_id).set(
-                check.reach.rank
-            )
+            self.tunnel_stage.labels(
+                self.instance, config.code, config.stable_id, self.check_policy
+            ).set(check.reach.rank)
         self.record_errors(checks)
 
     def record_errors(self, checks: Sequence[TunnelCheck]) -> None:
@@ -64,7 +67,9 @@ class PrometheusMetrics(MetricsServer, TunnelMetrics):
             current = check.error_kinds
             seen[key] = self.seen_errors.get(key, frozenset()) | current
             for kind in seen[key]:
-                self.tunnel_error.labels(self.instance, *key, kind).set(int(kind in current))
+                self.tunnel_error.labels(self.instance, *key, kind, self.check_policy).set(
+                    int(kind in current)
+                )
         # Tunnels removed from the config forget their errors.
         self.seen_errors.clear()
         self.seen_errors.update(seen)
